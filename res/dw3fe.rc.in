@@ -1,0 +1,2 @@
+/* the exe's icon: IDI_ICON1, which Qt also gives the windows */
+IDI_ICON1 ICON "@DW3FE_ICON@"
