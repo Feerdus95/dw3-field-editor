@@ -63,7 +63,10 @@ The window:
 
 - **Fields** (left): the areas and their places. Two places with the same name (the
   Asuka and Amaterasu servers' copies, story copies) show their number.
-- **The map** (middle), with the layer buttons and the overlays' opacity above it.
+- **The tools** (top): select, the three paint tools, undo and redo, and Test in game;
+  while painting, a bar below with what to paint and the brush's size (see [Editing](#editing)).
+- **The map** (middle), with the layer buttons and the overlays' opacity above it, and
+  the story point the characters show.
 - **Contents** (right): the field's characters, exits and triggers, and objects. A
   click selects the item on the map and centers it.
 - **Properties** (right): what is selected, or the field itself.

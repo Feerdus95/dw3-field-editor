@@ -4,6 +4,7 @@
    dw3fe [stage]                    opens the editor (and a stage, e.g. wstag330)
    dw3fe --shot out.png stage       draws a stage's map to a picture and exits
    dw3fe --check                    reads every stage and prints what it found
+   dw3fe --selftest                 checks what saving rests on over every stage
    dw3fe stage --select actor:N     opens a stage with something selected
                                     (actor:N, slot:N, object:N, start)
    dw3fe --data DIR                 the port's data folder (files/, mods/, stages/)
