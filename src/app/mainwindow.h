@@ -111,6 +111,7 @@ class MainWindow : public QMainWindow {
     void fillEntities();
     void select(int kind, int index, bool center);
     void applyStoryPoint();
+    int storyVersion(int g, int p) const;
     QString actorName(int actor) const;
     bool invisibleActor(int actor) const;
     std::string talkText(int entry) const;

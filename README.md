@@ -262,7 +262,8 @@ code. It isn't released yet. It's what plays the changes this editor saves:
 
 - It reads them from its data folder (`data/mods`), with the new fields and events.
 - **Test in game** (F5) saves and starts the port at the open field, at the story point
-  above the map. With an event selected, the game plays it once the field is up; with a
+  above the map. The game starts fresh, without your save, so the editor also gives it
+  the flags and items the characters shown at that point need (as the map shows them). With an event selected, the game plays it once the field is up; with a
   character, an object or a slot selected, the player starts beside it.
 
 To use the editor with the port, choose **The port's data folder...** on the first run

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **Fixed:** Test in game at a story point showed only the characters whose versions
+  need nothing but the story point: the game started without the flags and items the
+  others need (Tamer Natsumi in Central Park needs an item). The editor now passes them,
+  so the field looks as the map shows it. Needs a port that takes `--set`.
+
 ## v0.1.1
 
 - **Fixed:** running the editor from the command line (`--check`, `--shot` and the

@@ -720,25 +720,26 @@ void MainWindow::showVariant(int group, int actor) {
 
 /* Each spot's version as at the story point chosen: the first whose story
    conditions hold (the others it can't know count as holding) */
+/* The first version of spot g whose story conditions hold at story point p
+   (the others taken as holding), or -1 */
+int MainWindow::storyVersion(int g, int p) const {
+    for (int i : groups_[g].actors) {
+        bool ok = true;
+        for (auto &[code, value] : field_.stage.actors[i].conditions) {
+            int lo, hi;
+            if (code_kind(code) == CODE_STORY && (code_id(code) == p) != (value != 0)) ok = false;
+            if (code_kind(code) == CODE_SPECIAL && special_story_range(code_id(code), &lo, &hi) && (p >= lo && p <= hi) != (value != 0)) ok = false;
+        }
+        if (ok) return i;
+    }
+    return -1;
+}
+
 void MainWindow::applyStoryPoint() {
     int p = storyBox_->currentData().toInt();
     for (int g = 0; g < (int)groups_.size(); g++) {
-        int pick = groups_[g].actors[0];
-        if (p >= 0)
-            for (int i : groups_[g].actors) {
-                bool ok = true;
-                for (auto &[code, value] : field_.stage.actors[i].conditions)
-                {
-                    int lo, hi;
-                    if (code_kind(code) == CODE_STORY && (code_id(code) == p) != (value != 0)) ok = false;
-                    if (code_kind(code) == CODE_SPECIAL && special_story_range(code_id(code), &lo, &hi) && (p >= lo && p <= hi) != (value != 0)) ok = false;
-                }
-                if (ok) {
-                    pick = i;
-                    break;
-                }
-            }
-        showVariant(g, pick);
+        int v = p >= 0 ? storyVersion(g, p) : -1;
+        showVariant(g, v >= 0 ? v : groups_[g].actors[0]);
     }
 }
 
@@ -1612,7 +1613,21 @@ void MainWindow::testInGame() {
     }
     settings.setValue("port", exe);
     QStringList args{"--field", QString::number(field_.stage.modes[0].mode)};
-    if (storyBox_->currentData().toInt() >= 0) args << "--progress" << QString::number(storyBox_->currentData().toInt());
+    if (int p = storyBox_->currentData().toInt(); p >= 0) {
+        args << "--progress" << QString::number(p);
+        /* the story point view takes a version's flags and items as holding:
+           the game gets the ones they need set (a fresh game has none), unless
+           another version shown needs them clear */
+        std::set<int> need, clear;
+        for (int g = 0; g < (int)groups_.size(); g++)
+            if (int v = storyVersion(g, p); v >= 0)
+                for (auto &[code, value] : field_.stage.actors[v].conditions)
+                    if ((is_flag(code) && code_kind(code) != 0) || (code_kind(code) >= CODE_ITEM && code_kind(code) <= 0x8E) ||
+                        code_kind(code) == CODE_CARD)
+                        (value ? need : clear).insert(code);
+        for (int code : need)
+            if (!clear.count(code)) args << "--set" << QString("%1=1").arg(code, 4, 16, QChar('0'));
+    }
     /* an event selected: the port starts it once the field runs */
     if (selKind_ == KIND_EVENT && selIndex_ >= 0 && selIndex_ < (int)field_.stage.events.size())
         args << "--event" << QString::number(field_.stage.events[selIndex_].id);
