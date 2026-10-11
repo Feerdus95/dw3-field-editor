@@ -7,8 +7,9 @@ where exits and events trigger, and where random battles start, and edits them: 
 those layers, move, add and remove characters, objects and the start, change exits,
 dialogue lines and battles, then try the field in the game with one key.
 
-**Nothing from the game is included.** The editor reads your own copy of the game,
-through the native port's data folder.
+**Nothing from the game is included.** The editor reads your own copy of the game:
+your disc image, or the native port's data folder. Not affiliated with or endorsed by
+Bandai or Bandai Namco; *Digimon* is their trademark.
 
 ## What it shows
 
@@ -42,19 +43,22 @@ through the native port's data folder.
 ## Requirements
 
 - Windows 10 or 11, 64-bit.
-- The native port, set up with your disc, so its `data/` folder holds `files/`.
-- The fields' tables, made once by the port:
+- Your disc of *Digimon World 2003* (Europe, SLES-03936) as an image: `.cue`/`.bin`
+  or `.iso`. The editor checks it's that one.
+- To play your changes, and for Test in game: the native port, which loads them from its
+  data folder (`data/mods`), its new fields and events, and takes `--field` and `--event`.
 
-      dw2003.exe --dump-stages data/stages
+Without the port, the editor reads the fields from the disc: it runs each field's setup
+code from the disc as the game does, and writes what it set to the folder you pick
+(`stages/`, once), where your changes go too (`mods/`). With the port, pick its data
+folder instead, with `files/` and the fields' tables the port makes:
 
-  This writes one file per field to `data/stages`, plus `characters.json`. Dump them
-  again after updating the port: the events' scripts come from there.
-- A port that loads the editor's changes (`data/mods/stages`), its new fields and events,
-  and takes `--field` and `--event`, for Test in game.
+    dw2003.exe --dump-stages data/stages
 
 ## Use
 
-Run `dw3fe.exe`. The first time it asks for the port's `data` folder, and remembers it.
+Run `dw3fe.exe`. The first time it asks for your disc image and a folder for its work,
+or for the port's `data` folder, and remembers them.
 
 | Control | Does |
 |---|---|
@@ -259,7 +263,11 @@ tiles.
 ### Command line
 
     dw3fe [wstag330]                   opens the editor (and a field)
-    dw3fe --data DIR                   the port's data folder
+    dw3fe --data DIR                   the port's data folder, or the editor's own
+    dw3fe --disc game.cue              the disc: the fields and files from it, when the
+                                       data folder has none
+    dw3fe --dump-disc game.cue DIR     writes the fields' tables from the disc to DIR,
+                                       as the port's --dump-stages does
     dw3fe --shot out.png wstag330      draws a field's map to a picture and exits
     dw3fe --check                      reads every field and prints what it found,
                                        and the conditions and actions left as numbers
@@ -307,7 +315,8 @@ tiles.
 ### The game's codes
 
 `src/core/game_codes.inc`, the story's steps (the event that moves the story on to each
-point) and the flags the game's code sets and checks, is written from dw3_decomp's C:
+point) and the flags the game's code sets and checks, is written from dw3_decomp's C, and
+`src/core/stage_setups.inc`, where each field's setup starts, from its symbols:
 
     python tools/game_codes.py [path/to/dw3_decomp]
 
@@ -325,14 +334,16 @@ and checks that it runs on its own and reads every field.
 - **"no g++.exe in C:\msys64\ucrt64\bin"**: the packages of step 2 are missing, or
   MSYS2 is somewhere else (set `MSYS2_DIR`).
 - **"build/dw3fe.exe is open"**: close the editor and build again.
-- **"No stages there"**: the data folder has no `stages/`. Run
-  `dw2003.exe --dump-stages data/stages` with the port.
+- **"No fields there"**: the data folder has no `stages/`. Start again and pick your
+  disc image, or run `dw2003.exe --dump-stages data/stages` with the port.
 
 ## How it reads a field
 
 - **The stage's tables** (its objects, triggers, characters, battles and files) are
-  the game's own C, compiled into the port. The port runs each field's setup and
-  writes what it set (`--dump-stages`).
+  set by each field's setup code, in its overlay (`AAA/PRO/WSTAGnnn.PRO`). The editor
+  loads the executable, FIELDSTG and the overlay where the game does, runs the setup on
+  a small MIPS interpreter and reads the tables it set from that memory; the port does
+  the same natively (`--dump-stages`), and both write the same.
 - **The background** is a file of 128-pixel tiles, each RLEN-packed: up to five
   sprites for each of three depths, then an 8-bit image of at most 256 x 128 pixels with
   its 256 colors. Writing one, the editor drops what a nearer depth hides, cuts each depth

@@ -1,6 +1,8 @@
 """Writes src/core/game_codes.inc from the decompilation's C: where the story
 moves on (GAME.progress set at an event's end) and the flags the game's code
-sets and checks outside the stage tables (the dump has those).
+sets and checks outside the stage tables (the dump has those); and
+src/core/stage_setups.inc, where each stage's setup starts (its overlay's
+symbols), for reading the tables from the disc.
 
     python tools/game_codes.py [DECOMP]   (default: ../dw3_decomp)
 """
@@ -9,7 +11,8 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parents[1]
-SRC = Path(sys.argv[1] if len(sys.argv) > 1 else HERE.parent / 'dw3_decomp') / 'src'
+DECOMP = Path(sys.argv[1] if len(sys.argv) > 1 else HERE.parent / 'dw3_decomp')
+SRC = DECOMP / 'src'
 NAMED = {'FIELD_PROGRESS_EXTRA': 0x2D, 'FIELD_PROGRESS_MOVIE_BATTLES': 0x2B}
 
 FUNC = re.compile(r'^\w[\w\s\*]*?\b(\w+)\s*\([^;]*\)\s*\{')
@@ -63,4 +66,14 @@ out += ['};', '/* the flags the game\'s code sets (set) or checks: the stage (""
 out += ['    {0x%04X, %d, %d, %s, %d},' % (code, s, v, c(st), e) for code, s, v, st, e in sorted(flags)]
 out += ['};', '']
 (HERE / 'src/core/game_codes.inc').write_text('\n'.join(out), encoding='utf-8', newline='\n')
-print(len(story), 'story steps,', len(flags), 'flag uses')
+setups = []
+for f in sorted((DECOMP / 'config/eu/stages').glob('wstag*.txt')):
+    m = re.search(r'^setupStage = (0x[0-9A-Fa-f]+);', f.read_text(encoding='utf-8'), re.M)
+    if m: setups.append((f.stem, int(m.group(1), 16)))
+out = ['/* Written by tools/game_codes.py from the decompilation: do not edit */',
+       '/* each stage overlay (AAA/PRO/WSTAGnnn.PRO) and where its setupStage starts */',
+       'static const StageSetup STAGE_SETUPS[] = {']
+out += ['    {%s, 0x%08X},' % (c(n), a) for n, a in setups]
+out += ['};', '']
+(HERE / 'src/core/stage_setups.inc').write_text('\n'.join(out), encoding='utf-8', newline='\n')
+print(len(story), 'story steps,', len(flags), 'flag uses,', len(setups), 'stages')

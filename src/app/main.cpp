@@ -8,7 +8,10 @@
    dw3fe stage --select actor:N     opens a stage with something selected
                                     (actor:N, slot:N, object:N, event:N, start)
          [--window-shot out.png]    and saves the window and its properties as drawn, then quits
-   dw3fe --data DIR                 the port's data folder (files/, mods/, stages/)
+   dw3fe --data DIR                 the port's data folder (files/, mods/, stages/), or the editor's own
+   dw3fe --disc IMAGE               the game's disc (.cue, .bin or .iso): the fields' tables and files
+                                    from it, when the data folder has none
+   dw3fe --dump-disc IMAGE DIR      the fields' tables from the disc into DIR, as the port's dump
    dw3fe --new-field stage [--size WxH] [--background picture.png]
                                     a new field from a stage: a copy, or an empty map
    dw3fe stage --add-object picture.png X,Y [--frames N]
@@ -20,8 +23,12 @@
    dw3fe stage --add-character HEX X,Y
                                     a character with a slot of its own at a point, saved
 
-   The stages' tables come from the port: dw2003 --dump-stages DATA/stages. */
+   The stages' tables come from the disc (DATA/stages, made once), or from the
+   port: dw2003 --dump-stages DATA/stages. */
 #include <QApplication>
+#include <QCryptographicHash>
+#include <QFileInfo>
+#include <QPushButton>
 #include <QDir>
 #include <QFileDialog>
 #include <QImage>
@@ -34,15 +41,20 @@
 #include <algorithm>
 #include <cstring>
 #include <map>
+#include <memory>
 #include <set>
 #include <cstdio>
 #include "mainwindow.h"
 #include "characters.h"
+#include "disc.h"
 #include "codes.h"
 #ifdef _WIN32
 #include <io.h>
 #include <windows.h>
 #endif
+
+/* the disc's executable, Digimon World 2003 (Europe, SLES-03936) */
+static const char EXE_SHA1[] = "d1b7e4d646e3a9c2b88fdb25d20b5f7116bbb06d";
 
 static void attach_console() {
 #ifdef _WIN32
@@ -285,12 +297,24 @@ int main(int argc, char **argv) {
     app.setOrganizationName("dw3fe");
     app.setStyle(QStyleFactory::create("Fusion"));
 
-    QString data, shot, open, selectWhat, newField, size, background, addObject, addAt, exportId, exportTo, importFrom, addChar, windowShot;
+    QString data, discPath, shot, open, selectWhat, newField, size, background, addObject, addAt, exportId, exportTo, importFrom, addChar, windowShot;
     int frames = 1;
     bool check = false, selftest = false;
     QStringList args = app.arguments();
+    if (args.size() == 4 && args[1] == "--dump-disc") {
+        /* the fields' tables from the disc, as the port's --dump-stages writes them */
+        attach_console();
+        Disc disc;
+        int n = 0;
+        std::string err = disc.open(args[2].toStdString());
+        if (err.empty()) QDir().mkpath(args[3]), err = dump_stages(disc, args[3].toStdString(), &n);
+        if (!err.empty()) return fprintf(stderr, "--dump-disc: %s\n", err.c_str()), 1;
+        printf("%d stages dumped to %s\n", n, qPrintable(args[3]));
+        return 0;
+    }
     for (int i = 1; i < args.size(); i++) {
         if (args[i] == "--data" && i + 1 < args.size()) data = args[++i];
+        else if (args[i] == "--disc" && i + 1 < args.size()) discPath = args[++i];
         else if (args[i] == "--shot" && i + 1 < args.size()) shot = args[++i];
         else if (args[i] == "--new-field" && i + 1 < args.size()) newField = args[++i];
         else if (args[i] == "--size" && i + 1 < args.size()) size = args[++i];
@@ -310,32 +334,89 @@ int main(int argc, char **argv) {
                    !exportId.isEmpty() || !importFrom.isEmpty() || !addChar.isEmpty();
     if (console) attach_console();
 
-    /* the data folder: --data, the last one used, or data/ next to the exe */
+    /* the data folder, the port's or the editor's own made from the disc:
+       --data, the last one used, or data/ next to the exe */
     QSettings settings;
+    std::shared_ptr<Disc> disc;
+    auto openDisc = [&](const QString &path) {
+        auto d = std::make_shared<Disc>();
+        std::string err = d->open(path.toStdString());
+        if (err.empty() &&
+            QCryptographicHash::hash(QByteArray((const char *)d->exe.data(), (int)d->exe.size()), QCryptographicHash::Sha1).toHex() != EXE_SHA1)
+            err = "its SLES_039.36 isn't Digimon World 2003 (Europe, SLES-03936)'s";
+        if (!err.empty()) {
+            fprintf(stderr, "%s: %s\n", qPrintable(path), err.c_str());
+            if (!console) QMessageBox::critical(nullptr, "DW3 Field Editor", path + ":\n" + QString::fromStdString(err));
+            return false;
+        }
+        disc = d;
+        settings.setValue("disc", QFileInfo(path).absoluteFilePath());
+        return true;
+    };
+    auto askDisc = [&]() {
+        QString path = QFileDialog::getOpenFileName(nullptr, "Your Digimon World 2003 (Europe) disc", settings.value("disc").toString(),
+                                                    "Disc images (*.cue *.bin *.iso);;All files (*)");
+        return !path.isEmpty() && openDisc(path);
+    };
+    /* the fields' tables made from the disc into DIR/stages */
+    auto fromDisc = [&](const QString &dir) {
+        int n = 0;
+        QDir().mkpath(dir + "/stages");
+        std::string err = dump_stages(*disc, (dir + "/stages").toStdString(), &n);
+        if (!err.empty()) {
+            fprintf(stderr, "the disc's fields: %s\n", err.c_str());
+            if (!console) QMessageBox::critical(nullptr, "DW3 Field Editor", "Reading the disc's fields: " + QString::fromStdString(err));
+        }
+        return load_stages(dir);
+    };
+
     QStringList tries;
     if (!data.isEmpty()) tries << data;
-    tries << settings.value("data").toString() << app.applicationDirPath() + "/data" << app.applicationDirPath() + "/../data";
+    else tries << settings.value("data").toString() << app.applicationDirPath() + "/data" << app.applicationDirPath() + "/../data";
     std::vector<Stage> stages;
     for (const QString &d : tries)
         if (!d.isEmpty() && !(stages = load_stages(d)).empty()) {
             data = QDir(d).absolutePath();
             break;
         }
-    if (stages.empty() && !console) {
-        QMessageBox::information(nullptr, "DW3 Field Editor",
-                                 "Pick the native port's data folder: the one with files/ and stages/.\n\n"
-                                 "stages/ is made by the port: dw2003 --dump-stages data/stages");
-        data = QFileDialog::getExistingDirectory(nullptr, "The port's data folder");
-        if (!data.isEmpty()) stages = load_stages(data);
+    if (stages.empty() && !discPath.isEmpty() && openDisc(discPath)) {
+        if (data.isEmpty()) data = app.applicationDirPath() + "/data";
+        stages = fromDisc(data);
+    } else if (stages.empty() && !console) {
+        QMessageBox box(QMessageBox::Question, "DW3 Field Editor",
+                        "Where are the game's fields?\n\n"
+                        "Your disc image: the editor reads the fields from it, and keeps its changes in a folder of its own.\n"
+                        "The native port's data folder: the one with files/ and stages/ (dw2003 --dump-stages data/stages).");
+        QPushButton *fromImage = box.addButton("Your disc image...", QMessageBox::AcceptRole);
+        QPushButton *fromPort = box.addButton("The port's data folder...", QMessageBox::AcceptRole);
+        box.addButton(QMessageBox::Cancel);
+        box.exec();
+        if (box.clickedButton() == fromImage && askDisc()) {
+            data = QFileDialog::getExistingDirectory(nullptr, "A folder for the editor's work (its changes go in mods/)",
+                                                     app.applicationDirPath());
+            if (!data.isEmpty()) stages = fromDisc(data);
+        } else if (box.clickedButton() == fromPort) {
+            data = QFileDialog::getExistingDirectory(nullptr, "The port's data folder");
+            if (!data.isEmpty()) stages = load_stages(data);
+        }
     }
     if (stages.empty()) {
-        fprintf(stderr, "no stages: pass --data DIR, the port's data folder with stages/ (dw2003 --dump-stages DIR/stages)\n");
-        if (!console)
-            QMessageBox::critical(nullptr, "DW3 Field Editor", "No stages there. Make them with: dw2003 --dump-stages data/stages");
+        fprintf(stderr, "no stages: pass --data DIR, the port's data folder with stages/ (dw2003 --dump-stages DIR/stages), "
+                        "or --disc IMAGE\n");
+        if (!console) QMessageBox::critical(nullptr, "DW3 Field Editor", "No fields there.");
         return 1;
     }
+    data = QDir(data).absolutePath();
     settings.setValue("data", data);
-    Files files{data.toStdString()};
+    /* the game's files: the folder's files/, or the disc */
+    if (!QDir(data + "/files").exists() && disc == nullptr) {
+        QString last = settings.value("disc").toString();
+        if (!(QFileInfo::exists(last) && openDisc(last)) && (console || !askDisc())) {
+            fprintf(stderr, "no game files: %s has no files/; pass --disc IMAGE\n", qPrintable(data));
+            return 1;
+        }
+    }
+    Files files{data.toStdString(), disc};
     GameText text;
     text.load(files, std::clamp(settings.value("language", 0).toInt(), 0, LANG_COUNT - 1));
     /* each character's animation file, for the characters' sprites */

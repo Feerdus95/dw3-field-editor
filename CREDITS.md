@@ -11,7 +11,10 @@ text (`src/main/text/font.c`, `text_tools.c`, `text_window.c`) and the tables' l
 (`include/field_map.h`, `include/dw3/game_state.h`). `src/core/codes.cpp` ports the
 conditions and actions (`src/main/game/events.c`, its special conditions and their
 tables, `src/main/game/party.c`), and `src/core/game_codes.inc` is written from the
-stages' code (`src/stages/`) by `tools/game_codes.py`.
+stages' code (`src/stages/`) by `tools/game_codes.py`. `src/core/disc.cpp` reads the
+disc and the fields' tables as the native port's stage dump does, with the addresses of
+dw3_decomp's symbols (`config/eu/symbols_fieldstg.txt`, `config/eu/stages/`,
+`mk/version/eu.mk`); `src/core/stage_setups.inc` is written from those by the same tool.
 
 ```
 MIT License

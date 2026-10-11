@@ -1592,6 +1592,13 @@ void MainWindow::revertStage() {
 
 void MainWindow::testInGame() {
     if (field_.stage.modes.empty()) return;
+    if (files_.disc) {
+        /* the editor's own folder, made from the disc: the port plays its own data folder */
+        QMessageBox::information(this, "Test in game",
+                                 "Test in game runs the native port, with the changes in its data folder: start the editor "
+                                 "with the port's data folder (dw3fe --data DIR) to test there.");
+        return;
+    }
     if (!undo_->isClean() && !save()) return;
     /* the port: the one used last, or next to the data folder */
     QSettings settings;

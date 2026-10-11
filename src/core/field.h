@@ -6,13 +6,17 @@
 #include <array>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 #include "json.h"
+#include "disc.h"
 
 /* The game's files: DIR/mods/NNNN.bin wins over DIR/files/NNNN.bin, as in the port */
 struct Files {
     std::string dir;
+    /* the game's files when DIR has no files/: the disc image */
+    std::shared_ptr<const Disc> disc;
     std::vector<uint8_t> read(int fid) const;
     /* the game's own file, without the mods */
     std::vector<uint8_t> readOriginal(int fid) const;

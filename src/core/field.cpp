@@ -7,34 +7,29 @@
 static uint32_t rd32(const uint8_t *p) { return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24; }
 static int16_t rd16(const uint8_t *p) { return (int16_t)(p[0] | p[1] << 8); }
 
+static bool read_file(const char *path, std::vector<uint8_t> &out) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return false;
+    fseek(f, 0, SEEK_END);
+    out.resize(ftell(f));
+    fseek(f, 0, SEEK_SET);
+    if (fread(out.data(), 1, out.size(), f) != out.size()) out.clear();
+    fclose(f);
+    return true;
+}
+
 std::vector<uint8_t> Files::read(int fid) const {
     std::vector<uint8_t> out;
     char path[1200];
-    for (const char *sub : {"mods", "files"}) {
-        snprintf(path, sizeof path, "%s/%s/%04d.bin", dir.c_str(), sub, fid);
-        if (FILE *f = fopen(path, "rb")) {
-            fseek(f, 0, SEEK_END);
-            out.resize(ftell(f));
-            fseek(f, 0, SEEK_SET);
-            if (fread(out.data(), 1, out.size(), f) != out.size()) out.clear();
-            fclose(f);
-            break;
-        }
-    }
-    return out;
+    snprintf(path, sizeof path, "%s/mods/%04d.bin", dir.c_str(), fid);
+    return read_file(path, out) ? out : readOriginal(fid);
 }
 
 std::vector<uint8_t> Files::readOriginal(int fid) const {
     std::vector<uint8_t> out;
     char path[1200];
     snprintf(path, sizeof path, "%s/files/%04d.bin", dir.c_str(), fid);
-    if (FILE *f = fopen(path, "rb")) {
-        fseek(f, 0, SEEK_END);
-        out.resize(ftell(f));
-        fseek(f, 0, SEEK_SET);
-        if (fread(out.data(), 1, out.size(), f) != out.size()) out.clear();
-        fclose(f);
-    }
+    if (!read_file(path, out) && disc) out = disc->file(fid);
     return out;
 }
 
