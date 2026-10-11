@@ -740,6 +740,12 @@ void MainWindow::applyStoryPoint() {
     for (int g = 0; g < (int)groups_.size(); g++) {
         int v = p >= 0 ? storyVersion(g, p) : -1;
         showVariant(g, v >= 0 ? v : groups_[g].actors[0]);
+        /* no version of the spot is there at this point of the story: faint */
+        bool absent = p >= 0 && v < 0;
+        for (QGraphicsItem *it : {(QGraphicsItem *)groups_[g].item, groups_[g].badge})
+            if (it) it->setOpacity(absent ? 0.3 : 1);
+        if (groups_[g].item)
+            groups_[g].item->setToolTip(absent ? "Not here at this story point: none of its versions' conditions hold" : "");
     }
 }
 
