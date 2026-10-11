@@ -1,5 +1,6 @@
 /* DW3 Field Editor: Digimon World 2003's fields (the maps you walk), with
-   their logic maps, objects, exits and characters, for the native port.
+   their logic maps, objects, exits and characters, read from the disc, for
+   the native port.
 
    dw3fe [stage]                    opens the editor (and a stage, e.g. wstag330)
    dw3fe --shot out.png stage       draws a stage's map to a picture and exits

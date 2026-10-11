@@ -483,7 +483,7 @@ void MainWindow::showAbout() {
     box.setIconPixmap(QIcon(":/dw3fe.ico").pixmap(96, 96));
     box.setTextFormat(Qt::RichText);
     box.setText(QString("<h2>DW3 Field Editor</h2><p>Version %1</p>"
-                        "<p>An editor for the fields of <i>Digimon World 2003</i>, for its native PC port.</p>"
+                        "<p>An editor for the fields of <i>Digimon World 2003</i>, read from your disc, for its native PC port.</p>"
                         "<p>&copy; 2026 Feerdus &middot; MIT License<br>"
                         "<a href='https://github.com/Feerdus95/dw3-field-editor'>github.com/Feerdus95/dw3-field-editor</a></p>"
                         "<p>Built on <a href='https://github.com/ReGame-Labs/dw3_decomp'>dw3_decomp</a> (MIT, juandav) "

@@ -1,11 +1,14 @@
 # DW3 Field Editor
 
-An editor for the fields of *Digimon World 2003* (the maps you walk around), for the
-game's native PC port, built from [dw3_decomp](https://github.com/ReGame-Labs/dw3_decomp). It shows each field
+An editor for the fields of *Digimon World 2003* (the maps you walk around), built on
+[dw3_decomp](https://github.com/ReGame-Labs/dw3_decomp). It reads them from your disc and shows each field
 as the game draws it, with the layers the game uses underneath: where you can walk,
 where exits and events trigger, and where random battles start, and edits them: paint
 those layers, move, add and remove characters, objects and the start, change exits,
-dialogue lines and battles, then try the field in the game with one key.
+dialogue lines and battles.
+
+Your changes are played in the game's native PC port, which isn't released yet; with
+it, Test in game tries the field with one key.
 
 **Nothing from the game is included.** The editor reads your own copy of the game:
 your disc image, or the native port's data folder. Not affiliated with or endorsed by
@@ -45,8 +48,9 @@ Bandai or Bandai Namco; *Digimon* is their trademark.
 - Windows 10 or 11, 64-bit.
 - Your disc of *Digimon World 2003* (Europe, SLES-03936) as an image: `.cue`/`.bin`
   or `.iso`. The editor checks it's that one.
-- To play your changes, and for Test in game: the native port, which loads them from its
-  data folder (`data/mods`), its new fields and events, and takes `--field` and `--event`.
+- To play your changes, and for Test in game: the native port (not released yet), which
+  loads them from its data folder (`data/mods`), its new fields and events, and takes
+  `--field` and `--event`.
 
 Without the port, the editor reads the fields from the disc: it runs each field's setup
 code from the disc as the game does, and writes what it set to the folder you pick
@@ -57,7 +61,8 @@ folder instead, with `files/` and the fields' tables the port makes:
 
 ## Use
 
-Run `dw3fe.exe`. The first time it asks for your disc image and a folder for its work,
+Download the zip from the [releases](https://github.com/Feerdus95/dw3-field-editor/releases), unzip it anywhere and
+run `dw3fe.exe`. The first time it asks for your disc image and a folder for its work,
 or for the port's `data` folder, and remembers them.
 
 | Control | Does |
@@ -239,7 +244,7 @@ field** removes it and its files.
 
 ### What saving writes
 
-Only what differs from the game, in the port's `data/` folder:
+Only what differs from the game, in the data folder (the port's, or the editor's own):
 
 - `mods/stages/<stage>.json`: the tables that changed (characters, objects, slots,
   start, battles), in the form `--dump-stages` writes. The port applies it after the
@@ -362,6 +367,8 @@ and checks that it runs on its own and reads every field.
 
 ## Not there yet
 
+- **Playing your changes** needs the native port, not released yet. The editor doesn't
+  write them back to a disc image for the original game or an emulator.
 - **The story's events**: the game starts some events at a point of the story from a
   list of its own; a field's new events start from a slot or a line.
 
