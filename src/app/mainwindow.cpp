@@ -382,7 +382,9 @@ MainWindow::MainWindow(const Files &files, std::vector<Stage> stages, const Game
 
     cursorLabel_ = new QLabel(this);
     zoomLabel_ = new QLabel(this);
+    vramLabel_ = new QLabel(this);
     statusBar()->addWidget(cursorLabel_, 1);
+    statusBar()->addPermanentWidget(vramLabel_);
     statusBar()->addPermanentWidget(zoomLabel_);
     connect(view_, &MapView::zoomChanged, this, [this](double z) { zoomLabel_->setText(QString("%1%").arg(qRound(z * 100))); });
     connect(view_, &MapView::hovered, this, [this](QPointF p, bool inside) {
@@ -913,7 +915,20 @@ void MainWindow::applyLayers() {
         if (o) o->setOpacity(opacity_->value() / 100.0);
 }
 
+void MainWindow::updateVram() {
+    if (field_.stage.name.empty()) return vramLabel_->clear();
+    int chars, pages, percent;
+    vram_room(files_, field_.stage, field_.imagesData, animFiles_, 8, 40, &chars, &pages, &percent);
+    vramLabel_->setText(QString("Sprite memory %1% · room for %2%3 characters · %4 object pages ")
+                            .arg(percent).arg(chars).arg(chars == 20 ? "+" : "").arg(pages));
+    vramLabel_->setStyleSheet(chars == 0 && pages == 0 ? "color:#e66" : chars < 2 || pages == 0 ? "color:#e0b040" : "");
+    vramLabel_->setToolTip("What the field leaves free of the VRAM its characters and objects share (320 x 256 halfwords): "
+                           "how many more characters of a game NPC's size (32 x 40) would get an image slot of their own, "
+                           "and how many new pages of object images would go (a page holds many pictures)");
+}
+
 void MainWindow::fillEntities() {
+    updateVram();
     syncing_ = true;
     entities_->clear();
     const Stage &s = field_.stage;

@@ -528,6 +528,13 @@ int Field::importSprite(const std::vector<Image> &frames, std::string *err) {
                     for (int x = u % 256; x < u % 256 + w && x < PAGE_W; x++) used[y * PAGE_W + x] = true;
             if (mode == 0 && cx / 64 == page && cy >= CLUT_ROW && cy < 256) cluts[(cy - CLUT_ROW) * 4 + cx % 64 / 16] = true;
         }
+        /* and what the characters' frames and palettes take of it (a halfword, 4 pixels) */
+        for (int y = 0; y < 256 && !vramTaken.empty(); y++)
+            for (int x = 0; x < 64; x++)
+                if (vramTaken[(size_t)y * 320 + page * 64 + x]) {
+                    for (int k = 0; k < 4 && y < PAGE_H; k++) used[y * PAGE_W + x * 4 + k] = true;
+                    if (y >= CLUT_ROW) cluts[(y - CLUT_ROW) * 4 + x / 16] = true;
+                }
     };
     /* a page with room for every frame and a palette: one the editor made, else a new one */
     int page = -1, slot = -1;

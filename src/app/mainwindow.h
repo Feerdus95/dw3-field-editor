@@ -269,6 +269,8 @@ class MainWindow : public QMainWindow {
     QTreeWidget *stageTree_, *entities_;
     QLineEdit *filter_;
     QScrollArea *props_;
-    QLabel *cursorLabel_, *zoomLabel_;
+    QLabel *cursorLabel_, *zoomLabel_, *vramLabel_;
+    /* the sprite memory the field leaves, in the status bar */
+    void updateVram();
     bool syncing_ = false;
 };

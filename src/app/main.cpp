@@ -409,12 +409,17 @@ int main(int argc, char **argv) {
         return 0;
     }
     if (check) {
-        int bad = 0;
+        int bad = 0, full = 0, noPage = 0;
         for (auto &s : stages) {
             Field f;
             if (!f.load(files, s, &animFiles)) printf("%s: %s\n", s.name.c_str(), f.error.c_str()), bad++;
+            /* the VRAM it leaves its characters and objects */
+            int chars, pages, percent;
+            vram_room(files, f.stage, f.imagesData, animFiles, 8, 40, &chars, &pages, &percent);
+            full += chars == 0, noPage += pages == 0;
         }
         printf("%d stages, %d unread; %d area and %d place names\n", (int)stages.size(), bad, (int)text.areas.size(), (int)text.places.size());
+        printf("sprite memory: %d fields without room for another character, %d for another page of objects\n", full, noPage);
         return bad != 0;
     }
     if (!shot.isEmpty()) {

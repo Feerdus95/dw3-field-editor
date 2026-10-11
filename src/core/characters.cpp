@@ -223,8 +223,20 @@ std::vector<bool> field_vram(const Files &files, const Stage &st, const std::vec
             for (int xx = std::max(x, 320); xx < x + w && xx < 640; xx++) taken[(size_t)(yy - 256) * 320 + xx - 320] = true;
     };
     size_t n;
-    /* the objects' pages, side by side from 0x140 */
-    for (int i = 0; objectPages && archive_entry(imagesData, i, &n); i++) mark(0x140 + i * 0x40, 256, 64, 256);
+    /* the objects' images, side by side from 0x140 (Vram::loadArchive): what they draw on, as
+       the game puts its characters' frames in their pages' empty parts */
+    for (int i = 0; objectPages; i++) {
+        const uint8_t *t = archive_entry(imagesData, i, &n);
+        if (!t) break;
+        std::vector<uint8_t> tim = unrlen(t, n);
+        if (tim.size() < 20) continue;
+        const uint8_t *img = tim.data() + 8 + (rd32(&tim[4]) & 8 ? rd32(&tim[8]) : 0);
+        if (img + 12 > tim.data() + tim.size()) continue;
+        int w = rd16(img + 8), h = rd16(img + 10);
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w && img + 14 + (y * w + x) * 2 <= tim.data() + tim.size(); x++)
+                if (rd16(img + 12 + (y * w + x) * 2)) mark(0x140 + i * 0x40 + x, 256 + y, 1, 1);
+    }
     /* the field's sprites: FIELD_SPRITES_FILE's entries 2 and 3, each an archive of TIMs 0x40 apart */
     std::vector<uint8_t> sprites = files.read(0x160);
     for (int e = 2; e <= 3; e++) {
@@ -246,7 +258,9 @@ std::vector<bool> field_vram(const Files &files, const Stage &st, const std::vec
         const auto &m = st.images[k];
         if (!m[2] && !m[3]) continue;
         int w = 0, h = 0;
-        bool used = false;
+        /* the party's (the player's 0, the partners' 1 to 3) are always taken, whoever they are */
+        bool used = k < 6;
+        if (used) w = 8, h = 64;
         for (const Actor &a : st.actors) {
             if (a.image != (int)k - 2) continue;
             used = true;
@@ -330,6 +344,35 @@ bool write_own_characters(const Files &files, const std::vector<OwnCharacter> &l
         return false;
     }
     return true;
+}
+
+void vram_room(const Files &files, const Stage &st, const std::vector<uint8_t> &imagesData, const std::vector<int> &animFiles,
+               int w, int h, int *characters, int *pages, int *percent) {
+    std::vector<bool> taken = field_vram(files, st, imagesData, animFiles, true);
+    *percent = (int)(std::count(taken.begin(), taken.end(), true) * 100 / taken.size());
+    /* new pages go after the ones there, while the next one is free of the rest */
+    std::vector<bool> rest = field_vram(files, st, imagesData, animFiles, false);
+    size_t n;
+    int p = 0;
+    while (archive_entry(imagesData, p, &n)) p++;
+    *pages = 0;
+    for (; p < 3; p++, ++*pages) {
+        bool free = true;
+        for (int y = 0; y < 256 && free; y++)
+            for (int x = 0; x < 64 && free; x++) free = !rest[(size_t)y * 320 + p * 64 + x];
+        if (!free) break;
+    }
+    /* slots one after another, each taking its room */
+    Stage probe = st;
+    *characters = 0;
+    while (*characters < 20) {
+        if (add_character_slot(probe, taken, w, h) < 0) break;
+        const auto &m = probe.images.back();
+        for (int y = m[3]; y < m[3] + h; y++)
+            for (int x = m[2]; x < m[2] + w; x++) taken[(size_t)(y - 256) * 320 + x - 320] = true;
+        for (int x = m[6]; x < m[6] + 16; x++) taken[(size_t)(m[7] - 256) * 320 + x - 320] = true;
+        ++*characters;
+    }
 }
 
 int register_character(const Files &files, const std::vector<uint8_t> &file, int width, int first, const std::string &name,

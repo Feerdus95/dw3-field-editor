@@ -61,6 +61,12 @@ void character_size(const Files &files, int animFile, int *w, int *h);
 /* A character image slot of its own for frames of w halfwords by h lines,
    where the field leaves VRAM free: the number Actor.image takes, or -1 */
 int add_character_slot(Stage &st, const std::vector<bool> &taken, int w, int h);
+/* The room a field leaves in VRAM: how many more characters of frames w x h
+   would get a slot of their own (up to 20), how many new pages of object
+   images would go (Field::importSprite: three pages at most, side by side),
+   and the share of the 320 x 256 taken, in percent */
+void vram_room(const Files &files, const Stage &st, const std::vector<uint8_t> &imagesData, const std::vector<int> &animFiles,
+               int w, int h, int *characters, int *pages, int *percent);
 
 /* The editor's characters: ids from the game's count on, their files 7000 + id - CHARACTERS */
 static const int GAME_CHARACTERS = 406, CHARACTER_FILES = 7000;
