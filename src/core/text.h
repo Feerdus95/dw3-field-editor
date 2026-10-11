@@ -49,6 +49,7 @@ std::vector<std::string> read_strings(const std::vector<uint8_t> &file);
 struct GameText {
     int lang = LANG_ENGLISH;
     std::vector<std::string> areas, places, items;
+    std::vector<std::string> digimon, cards; /* DIGNAM (a partner's name: its index + 1), CARDNM */
     void load(const Files &files, int language = LANG_ENGLISH);
     /* a text file's copy in the language: fid is the English one (the
        stage dump's textFile, run in English) */
@@ -57,6 +58,3 @@ struct GameText {
 };
 /* TEXT_AREA_NAMES (STAREA) and TEXT_STAGE_NAMES (STNAME), English copies: the banner's names */
 static const int AREA_NAMES_FILE = 0xAA + 1, PLACE_NAMES_FILE = 0xB8 + 1;
-
-/* (code, value) pairs as words: "flag 1A:1F set", "has item Mega Hand"... */
-std::string describe_codes(const std::vector<std::pair<int, int>> &codes, const GameText &text, bool actions);

@@ -272,38 +272,12 @@ std::vector<std::string> read_strings(const std::vector<uint8_t> &d) {
     return out;
 }
 
-/* TEXT_AREA_NAMES (STAREA), TEXT_STAGE_NAMES (STNAME), TEXT_ITEM_NAMES (ITMNAM), in the language */
+/* TEXT_AREA_NAMES (STAREA), TEXT_STAGE_NAMES (STNAME), TEXT_ITEM_NAMES (ITMNAM), TEXT_DIGIMON_NAMES (DIGNAM), TEXT_CARD_NAMES (CARDNM), in the language */
 void GameText::load(const Files &files, int language) {
     lang = language;
     areas = read_strings(files.read(fid(AREA_NAMES_FILE)));
     places = read_strings(files.read(fid(PLACE_NAMES_FILE)));
     items = read_strings(files.read(fid(0x6B + 1)));
-}
-
-std::string describe_codes(const std::vector<std::pair<int, int>> &codes, const GameText &text, bool actions) {
-    std::string out;
-    char b[128];
-    for (auto &[code, value] : codes) {
-        int kind = code >> 8 & 0xFE, id = code & 0x1FF;
-        if (code < 0x4100) {
-            if (actions) snprintf(b, sizeof b, "set flag %X:%02X to %d", code >> 8, code & 0xFF, value);
-            else snprintf(b, sizeof b, "flag %X:%02X is %d", code >> 8, code & 0xFF, value);
-        } else if (kind == 0x60) snprintf(b, sizeof b, "story point %s 0x%X", value ? "is" : "isn't", id);
-        else if (kind == 0x70) snprintf(b, sizeof b, actions ? "special %d" : "special condition %d %s", id, value ? "holds" : "doesn't hold");
-        else if (kind == 0x72) snprintf(b, sizeof b, "party stat %d %s", id, value ? "holds" : "doesn't hold");
-        else if (kind == 0x74) snprintf(b, sizeof b, "start event battle %d", id);
-        else if ((kind == 0x76 || kind == 0x78) && actions) snprintf(b, sizeof b, "card battle with %d (%d)", code & 0xFF, (code - 0x7600) >> 9);
-        else if (kind == 0x7E) snprintf(b, sizeof b, "warp arg %s %d", value ? "is" : "isn't", id);
-        else if (code >= 0x8000 && code < 0x9000) {
-            int item = code & 0x1FF;
-            std::string name = item < (int)text.items.size() && !text.items[item].empty() ? text.items[item] : "item " + std::to_string(item);
-            if (actions) snprintf(b, sizeof b, "%s %s", value ? "give" : "take", name.c_str());
-            else snprintf(b, sizeof b, "%s %s", value ? "has" : "hasn't", name.c_str());
-        } else if (kind == 0x90 && id >= 0x100) snprintf(b, sizeof b, "start event %d", 9000 + id - 0x100);
-        else if (kind == 0x90) snprintf(b, sizeof b, "start listed event %d", id);
-        else if (kind == 0x92) snprintf(b, sizeof b, actions ? "%s card %d" : "%s card %d", value ? (actions ? "give" : "has") : (actions ? "take" : "hasn't"), id);
-        else snprintf(b, sizeof b, "code %04X = %d", code, value);
-        out += (out.empty() ? "" : actions ? ", " : " and ") + std::string(b);
-    }
-    return out.empty() ? (actions ? "nothing" : "always") : out;
+    digimon = read_strings(files.read(fid(0x4F + 1)));
+    cards = read_strings(files.read(fid(0x17 + 1)));
 }

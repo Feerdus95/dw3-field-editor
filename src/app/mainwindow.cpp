@@ -2,6 +2,7 @@
 #include "mapview.h"
 #include "characters.h"
 #include <array>
+#include <QAbstractItemView>
 #include <QActionGroup>
 #include <QApplication>
 #include <QCloseEvent>
@@ -170,6 +171,7 @@ MainWindow::MainWindow(const Files &files, std::vector<Stage> stages, const Game
     : files_(files), stages_(std::move(stages)), text_(text), animFiles_(std::move(animFiles)) {
     setWindowTitle("DW3 Field Editor");
     rebuildModes();
+    loadFlagNames();
     undo_ = new QUndoStack(this);
     connect(undo_, &QUndoStack::cleanChanged, this, &MainWindow::updateTitle);
 
@@ -256,6 +258,9 @@ MainWindow::MainWindow(const Files &files, std::vector<Stage> stages, const Game
     charMenu->addSeparator();
     charMenu->addAction("&Your characters...", this, &MainWindow::manageCharacters)
         ->setToolTip("The characters you imported: place, redraw, export, rename or delete them");
+    QMenu *storyMenu = menuBar()->addMenu("&Story");
+    storyMenu->addAction("&Flags...", this, &MainWindow::manageFlags)
+        ->setToolTip("What the game remembers: every flag the fields and the game use, by what uses it; name yours, or make new ones");
     QMenu *mapMenu = menuBar()->addMenu("&Map");
     mapMenu->addAction("&Resize...", this, &MainWindow::resizeMap)
         ->setToolTip("Add or take away 128-pixel tiles on any side; what is on the map moves with it");
@@ -370,7 +375,10 @@ MainWindow::MainWindow(const Files &files, std::vector<Stage> stages, const Game
     tb->addWidget(new QLabel(" Story point ", tb));
     storyBox_ = new QComboBox(tb);
     storyBox_->addItem("any", -1);
-    for (int p = 0; p <= 0x2D; p++) storyBox_->addItem(QString("0x%1").arg(p, 2, 16, QChar('0')), p);
+    for (int p = 0; p < STORY_POINTS; p++) storyBox_->addItem(storyName(p, true), p);
+    storyBox_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    storyBox_->setMinimumContentsLength(30);
+    storyBox_->view()->setMinimumWidth(560);
     storyBox_->setToolTip("Shows each spot's character as at this point of the story (GAME.progress), where its "
                           "conditions say; Test in game starts there too");
     tb->addWidget(storyBox_);
@@ -570,6 +578,7 @@ void MainWindow::openStage(const QString &name) {
     original_ = *st;
     Stage edited = savedStage((int)(st - stages_.data()));
     field_ = Field();
+    invalidateCodes(); /* the uses of the fields but the open one's */
     savedShiftX_ = savedShiftY_ = 0;
     revertAct_->setText(st->isNew() ? "&Delete this new field..." : "&Revert to the game's...");
     if (!field_.load(files_, edited, &animFiles_)) {
@@ -719,7 +728,11 @@ void MainWindow::applyStoryPoint() {
             for (int i : groups_[g].actors) {
                 bool ok = true;
                 for (auto &[code, value] : field_.stage.actors[i].conditions)
-                    if ((code >> 8 & 0xFE) == 0x60 && ((code & 0x1FF) == p) != (value != 0)) ok = false;
+                {
+                    int lo, hi;
+                    if (code_kind(code) == CODE_STORY && (code_id(code) == p) != (value != 0)) ok = false;
+                    if (code_kind(code) == CODE_SPECIAL && special_story_range(code_id(code), &lo, &hi) && (p >= lo && p <= hi) != (value != 0)) ok = false;
+                }
                 if (ok) {
                     pick = i;
                     break;
@@ -948,7 +961,7 @@ void MainWindow::fillEntities() {
     };
     auto actorItem = [&](QTreeWidgetItem *parent, int i, const QString &where) {
         const Actor &a = s.actors[i];
-        QString cond = a.conditions.empty() ? "" : "  — if " + QString::fromStdString(describe_codes(a.conditions, text_, false));
+        QString cond = a.conditions.empty() ? "" : "  — if " + QString::fromStdString(describe_codes(a.conditions, words(), false));
         auto *it = new QTreeWidgetItem(parent, {QString("#%1  %2%3").arg(i).arg(actorName(i), cond), where});
         std::string first = a.talks.empty() ? "" : talkText(a.talks[0].entry);
         if (!first.empty()) it->setToolTip(0, QString::fromStdString(first));
@@ -1670,6 +1683,8 @@ void MainWindow::reloadTalks() {
 
 void MainWindow::setLanguage(int lang) {
     text_.load(files_, lang);
+    invalidateCodes();
+    for (int i = 1; i < storyBox_->count(); i++) storyBox_->setItemText(i, storyName(storyBox_->itemData(i).toInt(), true));
     QSettings().setValue("language", lang);
     reloadTalks();
     stageTree_->clear();

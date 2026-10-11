@@ -23,27 +23,6 @@ QString slotType(int t);
 bool leaves(int t);
 extern const char *DIRS[8];
 
-/* (code, value) pairs as the user writes them: "1A1F=1, 7093=0", codes in hex */
-static QString codesText(const std::vector<std::pair<int, int>> &c) {
-    QStringList parts;
-    for (auto &[code, value] : c) parts << QString("%1=%2").arg(code, 4, 16, QChar('0')).toUpper().replace("X", "x").arg(value);
-    return parts.join(", ");
-}
-
-static bool parseCodes(const QString &text, std::vector<std::pair<int, int>> &out) {
-    out.clear();
-    for (QString part : text.split(QRegularExpression("[,;]"), Qt::SkipEmptyParts)) {
-        part = part.trimmed();
-        int eq = part.indexOf('=');
-        if (eq < 0) return false;
-        bool ok1, ok2;
-        int code = part.left(eq).trimmed().toInt(&ok1, 16), value = part.mid(eq + 1).trimmed().toInt(&ok2, 0);
-        if (!ok1 || !ok2 || code < 0 || code > 0xFFFE) return false;
-        out.push_back({code, value});
-    }
-    return true;
-}
-
 static QSpinBox *spin(int lo, int hi, int value, int base = 10) {
     auto *s = new QSpinBox;
     s->setRange(lo, hi);
@@ -177,16 +156,9 @@ void MainWindow::actorForm(QFormLayout *f, int index) {
     auto *dir = dirBox(a.dir);
     connect(dir, &QComboBox::currentIndexChanged, this, [=](int v) { edit([v](Actor &c) { c.dir = v; }, "Turn a character"); });
     f->addRow("Facing", dir);
-    auto *cond = new QLineEdit(codesText(a.conditions));
-    cond->setPlaceholderText("always");
-    cond->setToolTip("code=value pairs, codes in hex: 1A1F=1 (flag 1A:1F set), 602A=1 (story point 0x2A)...");
-    connect(cond, &QLineEdit::editingFinished, this, [=] {
-        std::vector<std::pair<int, int>> c;
-        if (!parseCodes(cond->text(), c)) return cond->setStyleSheet("color:#f66");
-        if (c != field_.stage.actors[index].conditions) edit([c](Actor &x) { x.conditions = c; }, "Change when a character appears");
-    });
-    f->addRow("Appears if", cond);
-    f->addRow("", richLabel("<span style='color:#999'>" + esc(describe_codes(a.conditions, text_, false)) + "</span>"));
+    if (a.conditions.empty()) f->addRow("Appears", richLabel("always"));
+    else f->addRow(richLabel("Appears if all of these hold:"));
+    f->addRow(codesEditor(a.conditions, false, 0, [=](const Codes &c) { edit([c](Actor &x) { x.conditions = c; }, "Change when a character appears"); }));
 
     /* what it says: each line with its conditions and actions */
     f->addRow(richLabel("<h4>What it says</h4><span style='color:#999'>The first line whose conditions hold; the "
@@ -195,14 +167,9 @@ void MainWindow::actorForm(QFormLayout *f, int index) {
         const Talk &t = a.talks[k];
         auto *box = new QGroupBox(QString("Line %1").arg(k + 1));
         auto *bf = new QFormLayout(box);
-        auto *when = new QLineEdit(codesText(t.conditions));
-        when->setPlaceholderText(k + 1 == (int)a.talks.size() ? "always (the last line)" : "always");
-        connect(when, &QLineEdit::editingFinished, this, [=] {
-            std::vector<std::pair<int, int>> c;
-            if (!parseCodes(when->text(), c)) return when->setStyleSheet("color:#f66");
-            if (c != field_.stage.actors[index].talks[k].conditions) edit([c, k](Actor &x) { x.talks[k].conditions = c; }, "Change a line's conditions");
-        });
-        bf->addRow("When", when);
+        bf->addRow(richLabel(t.conditions.empty() ? (k == 0 ? (a.talks.size() == 1 ? "Always said" : "Always said (the lines below never are)") : k + 1 == (int)a.talks.size() ? "Said when the lines above aren't" : "Always said (the lines below never are)")
+                                                  : "Said when all of these hold:"));
+        bf->addRow(codesEditor(t.conditions, false, 0, [=](const Codes &c) { edit([c, k](Actor &x) { x.talks[k].conditions = c; }, "Change a line's conditions"); }));
         auto *textBox = new QComboBox;
         for (int e = 0; e < (int)talks_.size(); e++) {
             QString line = QString::fromStdString(talks_[e]).replace('\n', ' ');
@@ -235,16 +202,8 @@ void MainWindow::actorForm(QFormLayout *f, int index) {
         textButtons->addWidget(newText);
         textButtons->addStretch();
         bf->addRow("", textButtons);
-        auto *then = new QLineEdit(codesText(t.actions));
-        then->setPlaceholderText("nothing");
-        then->setToolTip("code=value pairs it applies when the text ends: 1A1F=1 sets flag 1A:1F...");
-        connect(then, &QLineEdit::editingFinished, this, [=] {
-            std::vector<std::pair<int, int>> c;
-            if (!parseCodes(then->text(), c)) return then->setStyleSheet("color:#f66");
-            if (c != field_.stage.actors[index].talks[k].actions) edit([c, k](Actor &x) { x.talks[k].actions = c; }, "Change a line's actions");
-        });
-        bf->addRow("Then", then);
-        if (!t.actions.empty()) bf->addRow("", richLabel("<span style='color:#999'>" + esc(describe_codes(t.actions, text_, true)) + "</span>"));
+        bf->addRow(richLabel(t.actions.empty() ? "Then nothing happens" : "Then, as the text ends:"));
+        bf->addRow(codesEditor(t.actions, true, 0, [=](const Codes &c) { edit([c, k](Actor &x) { x.talks[k].actions = c; }, "Change a line's actions"); }));
         auto *buttons = new QHBoxLayout;
         auto *up = new QToolButton, *down = new QToolButton, *del = new QToolButton;
         up->setText("Up"), down->setText("Down"), del->setText("Remove");
@@ -339,8 +298,7 @@ void MainWindow::eventForm(QFormLayout *f, int index) {
     QString notes = by.isEmpty() ? "Nothing in this field starts it: a slot of type Event does, or the story (the game's own lists)."
                                  : "Started by " + by.join(", ") + ".";
     if (e.id >= EDITOR_EVENTS && e.id < EDITOR_EVENTS + 0x100)
-        notes += QString("<br>A character's line starts it with the action <b>%1=1</b>.")
-                     .arg(QString::number(0x9100 | (e.id - EDITOR_EVENTS), 16).toUpper());
+        notes += QString("<br>A character's line starts it with the action <b>Start an event: Event %1</b>.").arg(e.id);
     if (e.start) notes += "<br>Code starts it: it has no script to edit.";
     if (e.end) notes += "<br>Code of its own runs when it ends.";
     f->addRow(richLabel(notes));
@@ -556,18 +514,12 @@ void MainWindow::slotForm(QFormLayout *f, int index) {
     std::vector<std::pair<int, int>> c;
     for (auto &k : t.cond)
         if (k[0] != 0xFFFF) c.push_back({k[0], k[1]});
-    auto *cond = new QLineEdit(codesText(c));
-    cond->setPlaceholderText("always");
-    cond->setToolTip("At most two code=value pairs, codes in hex");
-    connect(cond, &QLineEdit::editingFinished, this, [=] {
-        std::vector<std::pair<int, int>> p;
-        if (!parseCodes(cond->text(), p) || p.size() > 2) return cond->setStyleSheet("color:#f66");
+    f->addRow(richLabel(c.empty() ? "Always works" : "Works if all of these hold (two at most):"));
+    f->addRow(codesEditor(c, false, 2, [=](const Codes &p) {
         edit([p](Slot &s) {
             for (int k = 0; k < 2; k++) s.cond[k][0] = k < (int)p.size() ? p[k].first : 0xFFFF, s.cond[k][1] = k < (int)p.size() ? p[k].second : 0;
         }, "Change when a slot works");
-    });
-    f->addRow("Works if", cond);
-    f->addRow("", richLabel("<span style='color:#999'>" + esc(describe_codes(c, text_, false)) + "</span>"));
+    }));
     QString cells = index < 32 && !slotCells_[index].isNull()
                         ? QString("Cells %1, %2 to %3, %4").arg(slotCells_[index].left()).arg(slotCells_[index].top()).arg(slotCells_[index].right()).arg(slotCells_[index].bottom())
                         : QString("No cells set it off yet");

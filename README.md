@@ -25,7 +25,8 @@ through the native port's data folder.
 - **Exits**, marked where they are, with the field they lead to. A click on the
   destination opens it.
 - **Characters**: when each one appears, and what it says in each case, with the
-  game's text and the conditions in words ("flag 1A:1F is 1", "has" and the item's name).
+  game's text and the conditions in words ("the story is at 0x05 (after Seiryu Leader,
+  <field>)", "Agumon is in the party", "has" and the item's name).
   - A spot can hold several versions of a character, for the story's points: the map
     shows one sprite with their count (×32), and Properties steps through them. The
     game shows the first whose conditions hold.
@@ -97,12 +98,22 @@ is selected.
 **Properties** edits what is selected: a character's look, place, facing, when it
 appears, and each of its lines (when, which text, what it does after); an exit's type,
 destination, arrival and conditions; an object's frame, depth and animation; the start;
-and, from **Battles** in Contents, each area's rate and its eight battles. Conditions and
-actions are written as `code=value` pairs with the code in hex (`1A1F=1`, the flag
-1A:1F set; `602A=1`, story point 0x2A), and shown in words below.
+and, from **Battles** in Contents, each area's rate and its eight battles.
 
-**Story point** (above the map) shows each spot's version as at that point of the story,
-and Test in game starts there.
+Conditions and actions are a row each: what kind (the story's point or span, a flag, a
+field visited, an item, a card, the partners, money...), which one, picked from a list
+in the game's names, and whether it holds or not (or, as an action, set or clear, give
+or take). **Code (advanced)** keeps any other as the game's tables have it, in hex; a
+row's tooltip shows its code too.
+
+The story's points are named after the event that moves the story on to each, and where
+(0x05: after Seiryu Leader, and the field where). Flags are named by their group and number
+(1A:1F) and by what sets them; **Story > Flags** lists every flag the fields and the
+game's code use, with each use, lets you name them (kept in mods/flags.json) and makes
+**new flags** nothing in the game uses, for a story of your own.
+
+**Story point** (above the map) shows each spot's version as at that point of the story
+(the spans included), and Test in game starts there.
 
 **Ctrl+Z / Ctrl+Y** undo and redo, **Ctrl+S** saves, **F5** saves and tests in the game;
 with an event selected, the game plays it once the field is up, and with a character, an

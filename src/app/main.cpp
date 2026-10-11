@@ -7,6 +7,7 @@
    dw3fe --selftest                 checks what saving rests on over every stage
    dw3fe stage --select actor:N     opens a stage with something selected
                                     (actor:N, slot:N, object:N, event:N, start)
+         [--window-shot out.png]    and saves the window and its properties as drawn, then quits
    dw3fe --data DIR                 the port's data folder (files/, mods/, stages/)
    dw3fe --new-field stage [--size WxH] [--background picture.png]
                                     a new field from a stage: a copy, or an empty map
@@ -28,6 +29,7 @@
 #include <QPainter>
 #include <QSettings>
 #include <QStyleFactory>
+#include <QScrollArea>
 #include <QTimer>
 #include <algorithm>
 #include <cstring>
@@ -36,6 +38,7 @@
 #include <cstdio>
 #include "mainwindow.h"
 #include "characters.h"
+#include "codes.h"
 #ifdef _WIN32
 #include <io.h>
 #include <windows.h>
@@ -282,7 +285,7 @@ int main(int argc, char **argv) {
     app.setOrganizationName("dw3fe");
     app.setStyle(QStyleFactory::create("Fusion"));
 
-    QString data, shot, open, selectWhat, newField, size, background, addObject, addAt, exportId, exportTo, importFrom, addChar;
+    QString data, shot, open, selectWhat, newField, size, background, addObject, addAt, exportId, exportTo, importFrom, addChar, windowShot;
     int frames = 1;
     bool check = false, selftest = false;
     QStringList args = app.arguments();
@@ -300,6 +303,7 @@ int main(int argc, char **argv) {
         else if (args[i] == "--check") check = true;
         else if (args[i] == "--selftest") selftest = true;
         else if (args[i] == "--select" && i + 1 < args.size()) selectWhat = args[++i];
+        else if (args[i] == "--window-shot" && i + 1 < args.size()) windowShot = args[++i];
         else open = args[i];
     }
     bool console = check || selftest || !shot.isEmpty() || !newField.isEmpty() || !addObject.isEmpty() ||
@@ -420,6 +424,32 @@ int main(int argc, char **argv) {
         }
         printf("%d stages, %d unread; %d area and %d place names\n", (int)stages.size(), bad, (int)text.areas.size(), (int)text.places.size());
         printf("sprite memory: %d fields without room for another character, %d for another page of objects\n", full, noPage);
+        /* the conditions and actions in words: the ones left as numbers */
+        CodeWords cw;
+        cw.items = text.items, cw.cards = text.cards;
+        for (int i = 0; i < 8; i++) cw.partners.push_back(i + 1 < (int)text.digimon.size() ? text.digimon[i + 1] : "?");
+        std::map<int, int> raw;
+        int codes = 0;
+        auto words = [&](const Codes &c, bool actions) {
+            for (auto &[code, value] : c) {
+                codes++;
+                std::string w = describe_code(code, value, cw, actions);
+                if (w.rfind("code ", 0) == 0 || w.find("special ") != std::string::npos || w.find("[not a flag") != std::string::npos) raw[code]++;
+            }
+        };
+        for (auto &s : stages) {
+            for (auto &a : s.actors) {
+                words(a.conditions, false);
+                for (auto &t : a.talks) words(t.conditions, false), words(t.actions, true);
+            }
+            for (auto &t : s.slots)
+                for (auto &c : t.cond)
+                    if (c[0] != 0xFFFF) words({{c[0], c[1]}}, false);
+        }
+        printf("codes: %d, %d left as numbers; partners:", codes, (int)raw.size());
+        for (auto &p : cw.partners) printf(" %s", p.c_str());
+        for (auto &[code, n] : raw) printf("\n  %04X x%d: %s", code, n, describe_code(code, 1, cw, false).c_str());
+        printf("\n");
         return bad != 0;
     }
     if (!shot.isEmpty()) {
@@ -459,6 +489,16 @@ int main(int argc, char **argv) {
     w.showMaximized();
     w.openStage(open.isEmpty() ? settings.value("stage", "wstag330").toString() : open);
     if (!selectWhat.isEmpty()) QTimer::singleShot(100, &w, [&] { w.selectByName(selectWhat); });
+    /* --window-shot: the window as drawn, once it is up, then quit */
+    if (!windowShot.isEmpty())
+        QTimer::singleShot(1500, &w, [&] {
+            w.grab().save(windowShot);
+            /* and the whole of the properties, beside it: name-props.png */
+            for (QScrollArea *a : w.findChildren<QScrollArea *>())
+                if (a->widget() && a->parentWidget() && a->parentWidget()->objectName() == "properties")
+                    a->widget()->grab().save(QString(windowShot).replace(".png", "-props.png"));
+            app.quit();
+        });
     int r = app.exec();
     return r;
 }

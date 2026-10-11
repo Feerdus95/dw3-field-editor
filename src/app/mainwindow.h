@@ -5,8 +5,10 @@
 #include <QRect>
 #include <functional>
 #include <map>
+#include <set>
 #include <vector>
 #include "characters.h"
+#include "codes.h"
 #include "field.h"
 #include "text.h"
 
@@ -202,6 +204,42 @@ class MainWindow : public QMainWindow {
     void manageCharacters();
     void showEventMarks();
     std::vector<QGraphicsItem *> eventMarks_;
+
+    /* the conditions and actions (codes_ui.cpp): their words, the story's
+       points, the flags by name and by what uses them, and their editor */
+    const CodeWords &words() const;
+    mutable CodeWords words_;
+    mutable bool wordsBuilt_ = false;
+    /* "0x05 (after Seiryu Leader, East Sector)"; full: with what it gives and the event */
+    QString storyName(int point, bool full) const;
+    struct FlagUseText {
+        QString text; /* "Kail's line 2 sets it (Asuka City)" */
+        bool set;     /* sets or clears it, rather than checks it */
+    };
+    struct FlagUse {
+        int stage; /* in stages_, -1 for the game's code of every field */
+        FlagUseText use;
+    };
+    /* the other fields' (as saved) and the game's code's uses, by flag */
+    const std::map<int, std::vector<FlagUse>> &flagUses() const;
+    mutable std::map<int, std::vector<FlagUse>> flagUses_;
+    mutable bool flagUsesBuilt_ = false;
+    std::vector<std::pair<int, FlagUseText>> tableUses(const Stage &s) const;
+    /* a flag's uses, the open field's as edited first */
+    std::vector<FlagUse> usesOf(int code) const;
+    std::map<int, QString> flagNames_; /* mods/flags.json */
+    void loadFlagNames();
+    bool saveFlagNames();
+    /* "1A:1F, Met Kail", or what sets it */
+    QString flagLabel(int code) const;
+    int newFlag(const std::set<int> &used) const;
+    /* a flag from the list (current -2: just the list, to name them): its code, or -1 */
+    int pickFlag(int current);
+    void manageFlags();
+    /* after a save, a language or a field change: the words and the uses again */
+    void invalidateCodes();
+    /* a list of conditions or actions, a row each; commit gets the list changed. max: at most that many (0: any) */
+    QWidget *codesEditor(const Codes &codes, bool actions, int max, const std::function<void(const Codes &)> &commit);
 
     /* the properties (properties.cpp) */
     void showProperties();
