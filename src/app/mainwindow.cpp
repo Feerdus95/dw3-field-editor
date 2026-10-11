@@ -1596,6 +1596,23 @@ std::vector<std::vector<uint8_t>> MainWindow::textStrings(int key) const {
     return e ? read_raw_strings(std::vector<uint8_t>(e, e + n)) : std::vector<std::vector<uint8_t>>();
 }
 
+bool MainWindow::untranslated(const std::function<int(int lang)> &keyOf, int entry) const {
+    std::vector<std::vector<uint8_t>> first = textStrings(keyOf(0));
+    if (entry < 0 || entry >= (int)first.size()) return false;
+    /* the game's own strings, from its file */
+    int key = keyOf(0), fid = key >> 16, sub = (key & 0xFFFF) - 1;
+    std::vector<uint8_t> f = files_.readOriginal(fid);
+    size_t n;
+    const uint8_t *e = sub < 0 ? nullptr : archive_entry(f, sub, &n);
+    size_t game = sub < 0 ? read_raw_strings(f).size() : e ? read_raw_strings(std::vector<uint8_t>(e, e + n)).size() : 0;
+    if (entry < (int)game) return false;
+    for (int l = 1; l < LANG_COUNT; l++) {
+        std::vector<std::vector<uint8_t>> other = textStrings(keyOf(l));
+        if (entry >= (int)other.size() || other[entry] != first[entry]) return false;
+    }
+    return true;
+}
+
 int MainWindow::talkKey(int lang) const { return (field_.stage.textFile + lang) << 16; }
 
 /* an event's text: the archive (its fid less the language, plus LANGUAGE: 2
@@ -2123,6 +2140,15 @@ void MainWindow::newField() {
     form->addRow(copy);
     form->addRow(empty);
     form->addRow("", sizeRow);
+    /* the way in: one of this field's exits, led to it */
+    auto *link = new QComboBox(&d);
+    link->addItem("None yet (lead an exit to it later)", -1);
+    for (int i = 0; i < (int)field_.stage.slots.size(); i++) {
+        const Slot &t = field_.stage.slots[i];
+        if (slot_leaves(t.type)) link->addItem(QString("Slot %1: %2, now to %3").arg(i).arg(slotType(t.type)).arg(modeName((int16_t)t.arg)), i);
+    }
+    link->setToolTip("One of this field's exits leads to the new field instead, arriving at its start: the way to reach it in the game");
+    form->addRow("Reach it from", link);
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &d);
     form->addRow(buttons);
     connect(buttons, &QDialogButtonBox::accepted, &d, &QDialog::accept);
@@ -2164,10 +2190,22 @@ void MainWindow::newField() {
     }
     stages_.push_back(nf.stage);
     rebuildModes();
+    int from = link->currentData().toInt();
+    if (from >= 0) {
+        /* the exit, saved with this field: it arrives at the new one's start */
+        Stage s = field_.stage;
+        s.slots[from].arg = mode & 0xFFFF;
+        s.slots[from].x = (nf.stage.startX >> 8) & 0xFFFF, s.slots[from].y = (nf.stage.startY >> 8) & 0xFFFF;
+        s.slots[from].dir = nf.stage.startDir;
+        changeTables(s, "Lead an exit to a new field");
+        save();
+    }
     stageTree_->clear();
     buildStageTree();
     openStage(QString::fromStdString(nf.stage.name));
-    statusBar()->showMessage("New field made. Lead an exit of another field to it to reach it in the game", 10000);
+    statusBar()->showMessage(from >= 0 ? QString("New field made: slot %1 of the field before leads to it").arg(from)
+                                       : "New field made. Lead an exit of another field to it to reach it in the game",
+                             10000);
 }
 
 void MainWindow::closeEvent(QCloseEvent *e) {

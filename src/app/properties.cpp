@@ -217,6 +217,7 @@ void MainWindow::actorForm(QFormLayout *f, int index) {
         });
         bf->addRow("Says", textBox);
         bf->addRow("", richLabel("<i>" + esc(talkText(t.entry)) + "</i>"));
+        if (untranslated([this](int l) { return talkKey(l); }, t.entry)) bf->addRow("", richLabel("<span style='color:#e0b040'>The same in every language: switch View &gt; Text language to translate it.</span>"));
         /* the game's empty texts only end its lists, after lines that cover every case */
         if (k == 0 && talkText(t.entry).empty() && !invisibleActor(index))
             bf->addRow("", richLabel("<span style='color:#e66'>An empty text: talking to it shows an empty box and the game "
@@ -401,6 +402,8 @@ void MainWindow::eventForm(QFormLayout *f, int index) {
             else {
                 std::string line = t >= 0 && t < (int)texts.size() ? decode_text(texts[t].data(), texts[t].size()) : "(no such text)";
                 bf->addRow("", richLabel("<i>" + esc(line) + "</i>"));
+                int evText = e.text;
+                if (untranslated([this, evText](int l) { return eventKey(evText, l); }, t)) bf->addRow("", richLabel("<span style='color:#e0b040'>The same in every language: switch View &gt; Text language to translate it.</span>"));
                 auto *tb = new QHBoxLayout;
                 auto *editText = new QToolButton, *newText = new QToolButton;
                 editText->setText("Edit the text...");

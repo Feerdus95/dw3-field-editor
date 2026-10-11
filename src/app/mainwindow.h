@@ -160,6 +160,8 @@ class MainWindow : public QMainWindow {
        ask is false): its entry, or -1; then runs in the same undo step (to use the entry) */
     int appendString(const std::function<int(int lang)> &keyOf, const GameString &start, const QString &note,
                      const std::function<void(int entry)> &then = nullptr, bool ask = true);
+    /* a text the editor added (past the game's), still the same in every language */
+    bool untranslated(const std::function<int(int lang)> &keyOf, int entry) const;
     void editTalkText(int entry);
     void newTalkText(int actor, int talk);
     /* a name added to a names file (AREA_NAMES_FILE...) in every language, written at once: its index, or -1 */
