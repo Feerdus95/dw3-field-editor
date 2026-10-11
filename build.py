@@ -9,7 +9,8 @@ Needs MSYS2 (https://www.msys2.org) with its UCRT64 packages:
     pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-qt6-base
               mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja
 
-found at $MSYS2_DIR or C:/msys64.
+MSYS2 is looked for at $MSYS2_DIR, then where the UCRT64 g++ on PATH is,
+then at C:/msys64, where MSYS2's installer puts it unless told otherwise.
 """
 import os
 import re
@@ -22,14 +23,25 @@ HERE = Path(__file__).resolve().parent
 BUILD = HERE / "build"
 
 
+TOOLS = ("g++.exe", "cmake.exe", "ninja.exe", "windeployqt6.exe", "objdump.exe")
+
+
 def find_ucrt64():
-    root = Path(os.environ.get("MSYS2_DIR", "C:/msys64"))
-    bin_dir = root / "ucrt64/bin"
-    for tool in ("g++.exe", "cmake.exe", "ninja.exe", "windeployqt6.exe"):
-        if not (bin_dir / tool).exists():
-            sys.exit(f"no {tool} in {bin_dir}: install MSYS2 and its UCRT64 packages (see the top of build.py), "
-                     "or set MSYS2_DIR")
-    return bin_dir
+    """MSYS2's UCRT64 bin folder, with every tool the build runs"""
+    roots = [Path(os.environ["MSYS2_DIR"])] if os.environ.get("MSYS2_DIR") else []
+    gxx = shutil.which("g++")
+    if gxx and Path(gxx).parent.parent.name.lower() == "ucrt64":
+        roots.append(Path(gxx).parents[2])
+    roots.append(Path("C:/msys64"))
+    for root in roots:
+        bin_dir = root / "ucrt64/bin"
+        missing = [t for t in TOOLS if not (bin_dir / t).exists()]
+        if not missing:
+            return bin_dir
+        if root == roots[0] and os.environ.get("MSYS2_DIR"):
+            break
+    sys.exit(f"no {', '.join(missing)} in {bin_dir}: install MSYS2 and its UCRT64 packages (README, Building from "
+             "source), or set MSYS2_DIR to the folder MSYS2 is in")
 
 
 def run(cmd, env):

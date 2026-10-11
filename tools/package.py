@@ -20,7 +20,10 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parents[1]
 BUILD = HERE / "build"
 ROOT = "dw3-field-editor"
-MSYS2 = Path(os.environ.get("MSYS2_DIR", "C:/msys64"))
+sys.path.insert(0, str(HERE))
+from build import find_ucrt64  # noqa: E402  the same MSYS2 the build uses
+
+MSYS2 = find_ucrt64().parents[1]
 PREFIX = "mingw-w64-ucrt-x86_64-"
 
 

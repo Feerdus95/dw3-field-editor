@@ -1,69 +1,95 @@
 # DW3 Field Editor
 
-An editor for the fields of *Digimon World 2003* (the maps you walk around), built on
-[dw3_decomp](https://github.com/ReGame-Labs/dw3_decomp). It reads them from your disc and shows each field
-as the game draws it, with the layers the game uses underneath: where you can walk,
-where exits and events trigger, and where random battles start, and edits them: paint
-those layers, move, add and remove characters, objects and the start, change exits,
-dialogue lines and battles.
+An editor for the maps of *Digimon World 2003* (PlayStation, 2002). In the game these
+maps are called **fields**: the towns, rooms and dungeons you walk around in.
 
-Your changes are played in the game's native PC port, which isn't released yet; with
-it, Test in game tries the field with one key.
+The editor opens each field as the game draws it. On top of the picture, it shows the
+layers the game uses but never shows you: where you can walk, where exits and events
+start, and where random battles happen.
 
-**Nothing from the game is included.** The editor reads your own copy of the game:
-your disc image, or the native port's data folder. Not affiliated with or endorsed by
-Bandai or Bandai Namco; *Digimon* is their trademark.
+What you can do with it today:
+
+- Look at any field of the game, with its characters, their lines and when they appear.
+- Change a field: paint where you can walk, move or add characters and objects, change
+  exits, dialogue, battles and the scripted scenes (events).
+- Make things of your own: new characters, new objects from pictures, new fields.
+
+**To play your changes you need the game's native PC port**, a separate project that
+isn't released yet (see [The native port](#the-native-port)). Until then you can explore
+and edit fields and save your changes, but not play them.
+
+**Nothing from the game is included.** The editor reads your own copy of the game. Not
+affiliated with or endorsed by Bandai or Bandai Namco; *Digimon* is their trademark.
+
+## Getting started
+
+You need:
+
+- **Windows 10 or 11, 64-bit.**
+- **Your own disc of the European version of the game**, *Digimon World 2003*
+  (SLES-03936), as a disc image: a `.bin` + `.cue` pair, or an `.iso`. Make it from your
+  disc with any CD ripping program that saves raw `.bin`/`.cue` images. The American
+  version (*Digimon World 3*, SLUS-01436) and the Japanese one don't work: the editor
+  checks the disc and tells you if it's another.
+
+Then:
+
+1. Download the zip from the [releases page](https://github.com/Feerdus95/dw3-field-editor/releases) and unzip it anywhere.
+2. Run `dw3fe.exe`. It asks where the game's fields are: choose **Your disc image...**
+   and pick your `.cue`, `.bin` or `.iso`.
+3. Pick an empty folder for the editor's work. The editor reads the fields from the disc
+   into it once (a few seconds), and saves your changes there too.
+
+Next time, the editor opens straight away: it remembers the disc and the folder.
+
+## Words used here
+
+- **Field**: a map you walk around in. In the game's files each field is a stage,
+  numbered `wstag200` to `wstag974`; the Fields list shows that number when you hover a
+  field, and the command line uses it (`wstag330`).
+- **Mode**: the number the game uses to go to a field. Some fields have several (one
+  per point of the story).
+- **Slot**: an entry of a field's list of exits and triggers: an exit to another field,
+  a climb, a warp, or the start of an event. Which cells of the map set it off is painted
+  in the **Triggers** layer.
+- **Story point**: how far the story is, a number from 0x00 to 0x2D. Characters and exits
+  change with it. The editor names each point after what moves the story on to it.
+- **Flag**: a yes/no the game remembers (a chest opened, a talk done). Characters, lines
+  and exits can check flags; lines can set them.
+- **Event**: a scripted scene: characters walk and talk, the camera moves.
+- **Sprite memory**: the room a field has in the PlayStation's video memory for its
+  characters' and objects' pictures. Busy fields have little left.
+- Numbers written like `0x2F0` are in hexadecimal, as the game's data has them.
 
 ## What it shows
 
 - **Every field**, by the names the game gives them: a tree of areas (Asuka City,
   Central Sector...) and their places (Main Lobby, Central Park...), with a search.
-- **The map**, as the game composes it: the background's 128-pixel tiles in their
-  three depths, the animated objects, and the characters with their sprites, each
-  facing its way.
+- **The map**, as the game composes it: the background in its three depths, the
+  animated objects, and the characters with their sprites, each facing its way.
 - **The logic layers**, over the map:
-  - **Floor**: where the player can walk (darker green), and the slopes (lighter);
+  - **Floor**: where the player can walk (darker green), and the slopes (lighter).
   - **Triggers**: the cells that set off an exit, a climb, a warp or an event, a color
-    per slot;
+    per slot.
   - **Battle areas**: where random battles start, a color per area.
 - **Exits**, marked where they are, with the field they lead to. A click on the
   destination opens it.
-- **Characters**: when each one appears, and what it says in each case, with the
-  game's text and the conditions in words ("the story is at 0x05 (after Seiryu Leader,
-  <field>)", "Agumon is in the party", "has" and the item's name).
-  - A spot can hold several versions of a character, for the story's points: the map
-    shows one sprite with their count (×32), and Properties steps through them. The
-    game shows the first whose conditions hold.
-  - Characters without a sprite are spots the player talks to (signs, terminals): a
-    dashed ring.
-  - Characters at 0, 0 are placed by the field's events, and listed apart.
+- **Characters**: when each one appears and what it says, with the game's text and the
+  conditions in words ("the story is at 0x05 (after Seiryu Leader, Seiryu City)",
+  "Agumon is in the party", "has" and the item's name).
+  - One spot can hold several versions of a character, one for each part of the story.
+    The map shows one sprite with their count (×32), and Properties steps through them.
+    The game shows the first version whose conditions hold.
+  - Characters without a sprite are spots the player talks to (signs, terminals). They
+    show as a dashed ring.
+  - Characters at 0, 0 are placed by the field's events, and are listed apart.
 - **Objects**: their sprite, depth and animation.
-- **Events**: each one's script, the commands in words (a character walks there, says
-  this, the camera goes there...), with where it takes characters marked on the map,
-  and what starts it.
+- **Events**: each one's script, its commands in words (a character walks there, says
+  this, the camera goes there...), with the places it takes characters marked on the
+  map, and what starts it.
 - **The texts** in English, French, Italian, German or Spanish (View > Text language).
 
-## Requirements
-
-- Windows 10 or 11, 64-bit.
-- Your disc of *Digimon World 2003* (Europe, SLES-03936) as an image: `.cue`/`.bin`
-  or `.iso`. The editor checks it's that one.
-- To play your changes, and for Test in game: the native port (not released yet), which
-  loads them from its data folder (`data/mods`), its new fields and events, and takes
-  `--field` and `--event`.
-
-Without the port, the editor reads the fields from the disc: it runs each field's setup
-code from the disc as the game does, and writes what it set to the folder you pick
-(`stages/`, once), where your changes go too (`mods/`). With the port, pick its data
-folder instead, with `files/` and the fields' tables the port makes:
-
-    dw2003.exe --dump-stages data/stages
-
-## Use
-
-Download the zip from the [releases](https://github.com/Feerdus95/dw3-field-editor/releases), unzip it anywhere and
-run `dw3fe.exe`. The first time it asks for your disc image and a folder for its work,
-or for the port's `data` folder, and remembers them.
+## Using it
 
 | Control | Does |
 |---|---|
@@ -78,14 +104,15 @@ The window:
 
 - **Fields** (left): the areas and their places. Two places with the same name (the
   Asuka and Amaterasu servers' copies, story copies) show their number.
-- **The tools** (top): select, the three paint tools, undo and redo, and Test in game;
-  while painting, a bar below with what to paint and the brush's size (see [Editing](#editing)).
+- **The tools** (top): select, the three paint tools, undo and redo, and Test in game
+  (with the port). While painting, a bar below shows what to paint and the brush's size.
 - **The map** (middle), with the layer buttons and the overlays' opacity above it, and
-  the story point the characters show.
+  the **Story point** the characters are shown at.
 - **Contents** (right): the field's characters, exits and triggers, objects and events.
   A click selects the item on the map and centers it.
 - **Properties** (right): what is selected, or the field itself.
-- **The status bar**: the position under the cursor, and what each layer holds there.
+- **The status bar**: the position under the cursor, what each layer holds there, and
+  the sprite memory the field has left.
 - **About** (on the menu bar): the version, license and credits.
 
 ## Editing
@@ -97,181 +124,160 @@ The window:
 | Paint triggers | T | the cells that set off a slot (an exit, a climb, an event...), and the way the player must face |
 | Paint areas | A | where random battles start, and which of the four areas |
 
-While painting, the brush's size is in the bar above the map; **Shift** paints a
-rectangle and **Alt** picks the value under the cursor. A **right click** on the map
-adds a character, a version of a spot, an object or a slot, duplicates or deletes the
-selection, adds an object from a picture or an event, or moves the start there; the
-**Add** menu adds the same in the middle of what the map shows. **Delete** removes what
-is selected.
+- While painting, the brush's size is in the bar above the map. **Shift** paints a
+  rectangle and **Alt** picks the value under the cursor.
+- A **right click** on the map adds things there: a character, a version of a spot, an
+  object, a slot, an object from a picture, an event. It also duplicates or deletes the
+  selection, or moves the player's start there. The **Add** menu does the same in the
+  middle of the view.
+- **Delete** removes what is selected.
+- **Ctrl+Z / Ctrl+Y** undo and redo, **Ctrl+S** saves.
+- **File > Revert to the game's** deletes the field's saved changes.
 
-**Properties** edits what is selected: a character's look, place, facing, when it
-appears, and each of its lines (when, which text, what it does after); an exit's type,
-destination, arrival and conditions; an object's frame, depth and animation; the start;
-and, from **Battles** in Contents, each area's rate and its eight battles.
+**Properties** edits what is selected:
 
-Conditions and actions are a row each: what kind (the story's point or span, a flag, a
-field visited, an item, a card, the partners, money...), which one, picked from a list
-in the game's names, and whether it holds or not (or, as an action, set or clear, give
-or take). **Code (advanced)** keeps any other as the game's tables have it, in hex; a
-row's tooltip shows its code too.
+- a character: its look, place, facing, when it appears, and each of its lines (when
+  it's said, which text, what happens after);
+- an exit: its type, where it leads, where the player arrives, and its conditions;
+- an object: its frame, depth and animation;
+- the player's start;
+- the battles (**Battles** in Contents): each area's rate and its eight battles.
 
-The story's points are named after the event that moves the story on to each, and where
-(0x05: after Seiryu Leader, and the field where). Flags are named by their group and number
-(1A:1F) and by what sets them; **Story > Flags** lists every flag the fields and the
-game's code use, with each use, lets you name them (kept in mods/flags.json) and makes
-**new flags** nothing in the game uses, for a story of your own.
+**Conditions and actions** are a row each: what kind of thing (the story point, a flag,
+a field visited, an item, a card, the partners, money...), which one, picked from a list
+by the game's names, and whether it must hold or not (or, as an action, set or clear,
+give or take). **Code (advanced)** keeps any other as the game's tables have it, in
+hexadecimal; a row's tooltip shows its code too.
 
-**Story point** (above the map) shows each spot's version as at that point of the story
-(the spans included), and Test in game starts there.
+**Story points** are named after the event that moves the story on to each, and where
+it happens (0x05: after Seiryu Leader, in Seiryu City). **Flags** are named by their
+group and number (1A:1F) and by what sets them. **Story > Flags** lists every flag the
+fields and the game use, with each use. There you can name them and make **new flags**
+that nothing in the game uses, for a story of your own.
 
-**Ctrl+Z / Ctrl+Y** undo and redo, **Ctrl+S** saves, **F5** saves and tests in the game;
-with an event selected, the game plays it once the field is up, and with a character, an
-object or a slot selected, the player starts beside it.
+**Story point** (above the map) shows each spot's version as at that point of the story.
 
-The status bar shows the **sprite memory** the field leaves: the share of the VRAM its
-characters and objects share that is taken, how many more characters would get an image
-slot of their own and how many new pages of object images would go. Busy fields (the
-towns) have little or none left.
-
-**File > Revert to the game's** deletes the field's saved changes.
+The status bar shows the **sprite memory** the field has left: how much is taken, how
+many more characters would get room of their own, and how many new pages of object
+pictures would fit. Busy fields (the towns) have little or none left.
 
 ### Bigger maps and new backgrounds
 
-- **Map > Resize** adds tiles of 128 pixels on any side, or takes them away. What stands
-  on the map (characters, objects, the start) moves with its content, and so do the
-  exits of every field that arrive here (they are saved with the field). New cells are
-  blocked, without triggers or battles: paint them. A map has at most 255 tiles.
-- **Map > Export background** writes the background's three depths as pictures:
+- **Map > Resize** adds or removes 128-pixel tiles on any side. What stands on the map
+  (characters, objects, the start) moves with it, and so do the exits of other fields
+  that arrive here. New cells are blocked, without triggers or battles: paint them. A
+  map has at most 255 tiles.
+- **Map > Export background** saves the background's three depths as pictures:
   `name-back.png` (the ground, behind everything), `name-middle.png` (behind the
-  characters, unless a depth trigger puts the player behind it) and `name-front.png`
-  (over the characters: roofs, treetops).
+  characters) and `name-front.png` (over the characters: roofs, treetops).
 - **Map > Import background** reads them back: pick any of the three, and the editor
-  reads the others next to it. Only the tiles that changed are made again, each with its
-  own 256 colors. A picture with another name is the whole background, on the middle
-  depth. A picture of another size can resize the map to fit it, or be fitted to the map
-  (scaled to cover it, its middle kept).
+  finds the others next to it. A picture with another name becomes the whole background,
+  on the middle depth. A picture of another size can resize the map to fit it, or be
+  fitted to the map.
 
 A field whose background changed gets a file of its own: the game shares backgrounds
-between a place's story copies, and those stay as they are.
+between copies of a place, and those stay as they are.
 
 ### Texts
 
-A character's line shows its text; **Edit the text...** changes it, and **New text...**
-writes one of its own for the line. The dialog has the speaker's name and the text: a line
-break is a new line, an empty line a new page (the talk box shows three lines a page),
-`{player}` the player's name, and other `{..}` are codes the game's texts have, kept as
-they are. It says when a line is wider than the field's texts get, or a page longer than
-three lines. The letters are the font's: the European ones (é, ñ, ü, ß...) too.
+A character's line shows its text. **Edit the text...** changes it, and **New text...**
+writes a new one for the line.
 
-The texts are in the language View > Text language shows. A new text goes to every
-language as written; switch the language to translate it (until then Properties says it
-is the same in every language). The fields share their text
-files: a change to a text shows wherever it is said, and the dialog tells how many lines
-say it.
+- In the dialog, a line break is a new line, an empty line a new page (the talk box
+  shows three lines a page), and `{player}` is the player's name. Other `{..}` are codes
+  from the game's texts, kept as they are.
+- It warns when a line is wider than the game's texts get, or a page longer than three
+  lines. Accented letters (é, ñ, ü, ß...) work.
+- Texts are edited in the language View > Text language shows. A new text goes to every
+  language as written; switch the language to translate it.
+- Fields share their text files: a change shows wherever that text is said, and the
+  dialog tells how many lines say it.
 
 ### Events
 
 An event is a script the game runs: characters walk, pose and talk, the camera moves,
-the script waits for them, and it can end by leaving for another field. Events (in
-Contents) shows them; **Properties** edits the script, a command at a time: change one,
-move it up or down, remove it, or add one at the end. Places, walks and camera moves are
-marked on the map, numbered: drag a mark to move it. A **Say** shows its text, which can be edited or written
-anew as a character's line can. Some events are code the game runs: those show what
-starts them, without a script.
+and it can end by going to another field.
 
-**Right click > Add an event** makes one, numbered from 9000, its first command a walk to
-where you clicked. Something has to start it: a slot of type **Event** (Properties picks
-the event; paint its trigger cells), or a character's line, with the action **Start an
-event** and the event. With an event selected, **F5** plays
-it in the game.
+- **Events** in Contents lists them. **Properties** edits the script one command at a
+  time: change one, move it up or down, remove it, or add one at the end.
+- Places, walks and camera moves are marked on the map, numbered: drag a mark to move it.
+- A **Say** command shows its text, which you can edit or write anew.
+- Some events are code inside the game: those show what starts them, without a script.
+
+**Right click > Add an event** makes a new one (numbered from 9000), starting with a walk
+to where you clicked. Something has to start it: a slot of type **Event** (pick the event
+in Properties and paint its trigger cells), or a character's line with the action
+**Start an event**.
 
 ### Objects of your own
 
 **Right click > Add an object from a picture...** makes an object from a picture: one
-still frame, or the frames of an animation side by side, which the object plays in a
-loop; it shows the frames as they'll be cut, each one's anchor and the colors first. The picture gets 15 colors of its own and is anchored at its bottom middle, where
-you clicked. It goes into a page of the field's object images that the editor made, or a
-new one: a field has room for three pages, so the fields that use all three take no
-more.
+still frame, or the frames of an animation side by side, played in a loop. It shows how
+the frames will be cut first. The picture gets 15 colors of its own and is anchored at
+its bottom middle, where you clicked. A field has room for three pages of object
+pictures, so the fields that use all three can't take more.
 
 ### Characters of your own
 
-A new character is drawn to the game's own measure, as its people are: a 4-bit sprite
-(15 colors and a transparent one), standing in 4 frames and walking in 6,
-seen from 5 directions (south, south-west, west, north-west, north; the game mirrors the
-others).
+A new character is drawn to the game's own measure: a sprite of 15 colors plus
+transparency, 4 frames standing and 6 walking, seen from 5 directions (south,
+south-west, west, north-west, north; the game mirrors the others).
 
-Characters are picked by their look: a grid of each one's picture, named after who says
-its lines in the game (or the name you gave it), searchable by name, field or number, this
-field's first. The Character of a character's Properties, Add a character and Export a
-template all use it.
+Characters are picked by their look, from a grid of pictures named after who speaks
+their lines in the game (or the name you gave them), searchable by name, field or number.
 
-- **Characters > Export a template...** writes a character as a sheet to draw over: a
-  `.png` with its layout inside (a row per animation and direction, a cell per drawing,
-  the times and the order the game plays them in). **Blank template...** writes the
-  standard one, empty, with faint guides. If the program you draw in drops the layout
-  when saving, the import asks which character the sheet came from.
-- Draw over the sheet, keeping its cells, and **Characters > Import a character...**
-  reads it back. It says what isn't to the template yet (a cell's size, an empty cell,
-  more than 15 colors) instead of guessing; empty cells can be filled with the drawing
-  before, as an exception you choose. It asks for a name and offers to place it on the
-  field open.
-- **Characters > Your characters...** lists them: place one on the field, import new
-  drawings for it (every field that has it shows them), export its template, rename or
-  delete it.
-- A character added to a field asks for its first line, its name as the speaker. (The
-  text files' first text is empty: the game only ends its lists of lines with it, and
-  saying it crashes the game.)
-- The characters on a field at once each need an image slot, where their frames go in
-  VRAM; the game gives each look its own, shared only by characters of that look. The
-  editor does the same: a character added or changed takes a slot of its look, or a new
-  one where the field's VRAM has room. A slot shared by two looks shows in red, with a
-  button to give it its own.
+1. **Characters > Export a template...** saves a character as a sheet to draw over: a
+   `.png` with a row per animation and direction and a cell per drawing. **Blank
+   template...** saves an empty one with faint guides.
+2. Draw over the sheet, keeping its cells.
+3. **Characters > Import a character...** reads it back. It tells you what doesn't fit
+   the template (a cell's size, an empty cell, more than 15 colors) instead of guessing,
+   asks for a name, and offers to place it on the open field.
 
-The port finds the new characters in `mods/characters.json`.
+- **Characters > Your characters...** lists them: place one, import new drawings for it,
+  export its template, rename or delete it.
+- A character added to a field asks for its first line.
+- Every look on a field needs an **image slot** in the sprite memory. A character added
+  or changed takes a slot of its look, or a new one if there's room. A slot shared by two
+  looks shows in red, with a button to give it its own.
 
 ### New fields
 
 **File > New field** makes a field of your own from the one open: a copy of it, or an
-empty map of the size you choose, walkable all over. It takes a mode no field has
-(0x2F0 on) and the banner's area and place names: the game's, or new ones you type, which
-go to every language's names. It runs the
-code of the field it came from: its sprites, music and texts, and its events, which check
-the story as they do there. To reach it in the game, **Reach it from** leads one of the
-open field's exits to it as it is made, or lead an exit of any field to it later (it is
-in the exits' list); Test in game opens it directly. A new field has no "visited" flag
-(the game has one for the modes up to 0x2EF only). **File > Delete this new
-field** removes it and its files.
+empty map of the size you choose, walkable all over.
 
-### What saving writes
+- It gets a mode no field has (0x2F0 on), and the banner's area and place names: the
+  game's, or new ones you type.
+- It runs the code of the field it came from: its music, texts and events.
+- To reach it in the game, **Reach it from** leads one of the open field's exits to it,
+  or you can lead an exit of any field to it later (it is in the exits' list).
+- A new field has no "visited" flag (the game has those for modes up to 0x2EF only).
+- **File > Delete this new field** removes it and its files.
 
-Only what differs from the game, in the data folder (the port's, or the editor's own):
+## The native port
 
-- `mods/stages/<stage>.json`: the tables that changed (characters, objects, slots,
-  start, battles), in the form `--dump-stages` writes. The port applies it after the
-  field's own setup.
-- `mods/<file>.bin`: the field's file with the painted logic maps in it. The port
-  reads it instead of the game's.
-- `mods/<3000 + the field's number>.bin`: its background, once changed.
-- `mods/<5000 + the field's number>.bin`: its objects' images, once a picture is added
-  (6000 + its number for a new field).
-- `mods/<text file>.bin`: the text files whose texts changed, in each language.
-- `mods/<7000 + its number - 406>.bin`: a character of your own, its frames and
-  animations, and `mods/characters.json`, the list of them.
-- A new field: `mods/stages/new<mode>.json`, the whole of its tables, and its two files,
-  `mods/<4000 + 2 × its number>.bin` (the background) and the next one (its logic maps).
-- `mods/flags.json`: the names you gave the flags (Story > Flags), for the editor only.
+The native port is a PC version of the game built from
+[dw3_decomp](https://github.com/ReGame-Labs/dw3_decomp), a reconstruction of the game's
+code. It isn't released yet. It's what plays the changes this editor saves:
 
-A field as the game has it leaves no file. Some limits come from the game: a field has
-at most 31 slots, a logic map at most 256 different 64-pixel cells, and a map at most 255
-tiles.
+- It reads them from its data folder (`data/mods`), with the new fields and events.
+- **Test in game** (F5) saves and starts the port at the open field, at the story point
+  above the map. With an event selected, the game plays it once the field is up; with a
+  character, an object or a slot selected, the player starts beside it.
 
-### Command line
+To use the editor with the port, choose **The port's data folder...** on the first run
+(or start it with `dw3fe --data <the port's data folder>`) instead of your disc image.
+The port's data folder needs the fields' tables, which the port writes once:
+
+    dw2003.exe --dump-stages data/stages
+
+## Command line
 
     dw3fe [wstag330]                   opens the editor (and a field)
-    dw3fe --data DIR                   the port's data folder, or the editor's own
-    dw3fe --disc game.cue              the disc: the fields and files from it, when the
-                                       data folder has none
+    dw3fe --data DIR                   the folder to work in: the port's data folder,
+                                       or one the editor made from the disc
+    dw3fe --disc game.cue              your disc image, when the folder has no files
+                                       of the game
     dw3fe --dump-disc game.cue DIR     writes the fields' tables from the disc to DIR,
                                        as the port's --dump-stages does
     dw3fe --shot out.png wstag330      draws a field's map to a picture and exits
@@ -302,69 +308,119 @@ tiles.
 
 ## Building from source
 
-1. Install [MSYS2](https://www.msys2.org) (or `winget install MSYS2.MSYS2`).
-2. In an MSYS2 terminal, install the UCRT64 compiler, Qt 6, CMake and Ninja:
+The editor is C++17 with Qt 6, built on Windows with MSYS2's UCRT64 toolchain.
 
+1. **MSYS2.** Install it from [msys2.org](https://www.msys2.org), or with
+   `winget install MSYS2.MSYS2`. Its installer puts it in `C:\msys64` unless you choose
+   another folder.
+2. **The compiler, Qt 6, CMake and Ninja.** Open the **MSYS2 UCRT64** terminal (from the
+   Start menu), update MSYS2 and install them:
+
+       pacman -Syu
        pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-qt6-base \
                  mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja
 
-3. Install [Python 3](https://www.python.org), and optionally Pillow
-   (`pip install pillow`), which makes the exe's icon in every size Windows uses. Then
-   build:
+   (`pacman -Syu` may close the terminal to finish; open it again and run it once more.)
+3. **Python 3.8 or newer**, from [python.org](https://www.python.org) (the Windows one,
+   not MSYS2's). Optionally `pip install pillow`, which makes the exe's icon in every size
+   Windows uses.
+4. **Build**, from a normal Windows terminal (cmd or PowerShell) in this folder:
 
        python build.py
 
-   This writes `build/dw3fe.exe` with every DLL it needs next to it, so the folder runs
-   on its own. `python build.py --clean` builds from scratch. MSYS2 is found at
-   `C:\msys64`, or wherever `MSYS2_DIR` says.
+   (`py build.py` if `python` isn't on your PATH.) This writes `build\dw3fe.exe` with
+   every DLL it needs next to it, so the folder runs on its own. `python build.py --clean`
+   builds from scratch.
+
+`build.py` finds MSYS2 at the folder `MSYS2_DIR` names, then where the UCRT64 `g++` on
+your PATH is, then at `C:\msys64`. If you installed MSYS2 somewhere else, set it:
+`set MSYS2_DIR=D:\msys64` (cmd) or `$env:MSYS2_DIR="D:\msys64"` (PowerShell).
+
+5. **Run** `build\dw3fe.exe`, and continue as in [Getting started](#getting-started).
 
 ### The game's codes
 
-`src/core/game_codes.inc`, the story's steps (the event that moves the story on to each
-point) and the flags the game's code sets and checks, is written from dw3_decomp's C, and
-`src/core/stage_setups.inc`, where each field's setup starts, from its symbols:
+Two files are generated from [dw3_decomp](https://github.com/ReGame-Labs/dw3_decomp)
+and committed, so building doesn't need it:
 
-    python tools/game_codes.py [path/to/dw3_decomp]
+- `src/core/game_codes.inc`: the story's steps (the event that moves the story on to each
+  point) and the flags the game's code sets and checks, from its C;
+- `src/core/stage_setups.inc`: where each field's setup code starts, from its symbols.
+
+To write them again, clone dw3_decomp and run:
+
+    python tools/game_codes.py path/to/dw3_decomp
+
+(Without the path, it looks for `dw3_decomp` next to this folder.)
 
 ### Making a release
 
-    python tools/package.py v0.1.0
+    python tools/package.py v0.1.0 [--data DIR]
 
 builds, then packs `build/dw3-field-editor-v0.1.0-win64.zip`: the exe, its DLLs, this
 README, the license and credits, and `licenses/` with the license of every DLL, found
 through the MSYS2 package it comes from. It then unpacks the zip to a temporary folder
-and checks that it runs on its own and reads every field.
+and checks that it runs on its own and reads every field, from the data folder the
+editor used last or `--data DIR`.
 
 ### Troubleshooting
 
-- **"no g++.exe in C:\msys64\ucrt64\bin"**: the packages of step 2 are missing, or
-  MSYS2 is somewhere else (set `MSYS2_DIR`).
+- **"no g++.exe, ... in ...\ucrt64\bin"**: the packages of step 2 are missing, or MSYS2
+  is somewhere else: set `MSYS2_DIR`.
 - **"build/dw3fe.exe is open"**: close the editor and build again.
-- **"No fields there"**: the data folder has no `stages/`. Start again and pick your
-  disc image, or run `dw2003.exe --dump-stages data/stages` with the port.
+- **"No fields there"**: the folder has no fields. Start the editor again and pick your
+  disc image, or, with the port, run `dw2003.exe --dump-stages data/stages`.
+- **"isn't Digimon World 2003 (Europe, SLES-03936)'s"**: the disc image is of another
+  version of the game, or damaged.
 
-## How it reads a field
+## Under the hood
 
-- **The stage's tables** (its objects, triggers, characters, battles and files) are
-  set by each field's setup code, in its overlay (`AAA/PRO/WSTAGnnn.PRO`). The editor
-  loads the executable, FIELDSTG and the overlay where the game does, runs the setup on
-  a small MIPS interpreter and reads the tables it set from that memory; the port does
-  the same natively (`--dump-stages`), and both write the same.
-- **The background** is a file of 128-pixel tiles, each RLEN-packed: up to five
-  sprites for each of three depths, then an 8-bit image of at most 256 x 128 pixels with
-  its 256 colors. Writing one, the editor drops what a nearer depth hides, cuts each depth
-  in strips and packs them in that image.
+### What saving writes
+
+Only what differs from the game, in the work folder (the editor's own, or the port's
+data folder):
+
+- `mods/stages/<field>.json`: the field's tables that changed (characters, objects,
+  slots, start, battles), in the form `--dump-stages` writes. The port applies it after
+  the field's own setup.
+- `mods/<file>.bin`: the field's file with the painted logic maps in it. The port reads
+  it instead of the game's.
+- `mods/<3000 + the field's number>.bin`: its background, once changed.
+- `mods/<5000 + the field's number>.bin`: its objects' pictures, once a picture is added
+  (6000 + its number for a new field).
+- `mods/<text file>.bin`: the text files whose texts changed, in each language.
+- `mods/<7000 + its number - 406>.bin`: a character of your own, its frames and
+  animations, and `mods/characters.json`, the list of them.
+- A new field: `mods/stages/new<mode>.json`, the whole of its tables, and its two files,
+  `mods/<4000 + 2 × its number>.bin` (the background) and the next one (its logic maps).
+- `mods/flags.json`: the names you gave the flags (Story > Flags), for the editor only.
+
+A field as the game has it leaves no file. Some limits come from the game: a field has
+at most 31 slots, a logic map at most 256 different 64-pixel cells, and a map at most 255
+tiles.
+
+### How it reads a field
+
+- **The field's tables** (its objects, triggers, characters, battles and files) are set
+  by each field's setup code, in its overlay (`AAA/PRO/WSTAGnnn.PRO` on the disc). The
+  editor loads the game's executable, FIELDSTG (the field program) and the overlay where
+  the game does, runs the setup on a small MIPS interpreter, and reads the tables it set
+  from that memory. The port does the same natively (`--dump-stages`), and both write the
+  same.
+- **The background** is a file of 128-pixel tiles, each RLEN-packed: up to five sprites
+  for each of three depths, then an 8-bit image of at most 256 x 128 pixels with its 256
+  colors. Writing one, the editor drops what a nearer depth hides, cuts each depth in
+  strips and packs them in that image.
 - **The logic maps** are a tree of cells, 128 down to 8 pixels, ending in a byte per
   pixel: the floor's slope, a trigger's slot and facing, or a battle area.
-- **The objects** are frames of the field's sprite sheet, drawn from its images in an
-  emulated VRAM, as the game's sprite drawer does.
+- **The objects** are frames of the field's sprite sheet, drawn from its pictures in an
+  emulated video memory, as the game's sprite drawer does. Their pictures are 4-bit pages
+  of 256 x 256 pixels, with the palettes inside the page.
 - **The characters** are the first standing frame of their animation file.
 - **The text** is the game's text files, a copy for each language, through the font's
   glyphs and icons (the European letters are icons 59 on).
 - **The events** are the scripts FIELDSTG's event task reads, words of commands, read
   with the tables.
-- **The objects' pictures** are 4-bit pages of 256 x 256 pixels loaded at VRAM's
-  (0x140, 0x100), with the palettes inside the page, as the game's own.
 
 ## Not there yet
 
