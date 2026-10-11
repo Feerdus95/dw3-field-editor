@@ -132,6 +132,7 @@ The status bar shows the **sprite memory** the field leaves: the share of the VR
 characters and objects share that is taken, how many more characters would get an image
 slot of their own and how many new pages of object images would go. Busy fields (the
 towns) have little or none left.
+
 **File > Revert to the game's** deletes the field's saved changes.
 
 ### Bigger maps and new backgrounds
@@ -180,8 +181,8 @@ starts them, without a script.
 
 **Right click > Add an event** makes one, numbered from 9000, its first command a walk to
 where you clicked. Something has to start it: a slot of type **Event** (Properties picks
-the event; paint its trigger cells), or a character's line, with the action
-`9100=1` for event 9000, `9101=1` for 9001 and so on. With an event selected, **F5** plays
+the event; paint its trigger cells), or a character's line, with the action **Start an
+event** and the event. With an event selected, **F5** plays
 it in the game.
 
 ### Objects of your own
@@ -251,7 +252,6 @@ Only what differs from the game, in the data folder (the port's, or the editor's
   field's own setup.
 - `mods/<file>.bin`: the field's file with the painted logic maps in it. The port
   reads it instead of the game's.
-
 - `mods/<3000 + the field's number>.bin`: its background, once changed.
 - `mods/<5000 + the field's number>.bin`: its objects' images, once a picture is added
   (6000 + its number for a new field).
@@ -260,6 +260,7 @@ Only what differs from the game, in the data folder (the port's, or the editor's
   animations, and `mods/characters.json`, the list of them.
 - A new field: `mods/stages/new<mode>.json`, the whole of its tables, and its two files,
   `mods/<4000 + 2 × its number>.bin` (the background) and the next one (its logic maps).
+- `mods/flags.json`: the names you gave the flags (Story > Flags), for the editor only.
 
 A field as the game has it leaves no file. Some limits come from the game: a field has
 at most 31 slots, a logic map at most 256 different 64-pixel cells, and a map at most 255
@@ -360,8 +361,8 @@ and checks that it runs on its own and reads every field.
 - **The characters** are the first standing frame of their animation file.
 - **The text** is the game's text files, a copy for each language, through the font's
   glyphs and icons (the European letters are icons 59 on).
-- **The events** are the scripts FIELDSTG's event task reads, words of commands the port
-  dumps with the tables.
+- **The events** are the scripts FIELDSTG's event task reads, words of commands, read
+  with the tables.
 - **The objects' pictures** are 4-bit pages of 256 x 256 pixels loaded at VRAM's
   (0x140, 0x100), with the palettes inside the page, as the game's own.
 
