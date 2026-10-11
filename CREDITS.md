@@ -8,7 +8,10 @@ license: the map's tiles and logic maps (`src/fieldstg/map_streamer.c`, `stream.
 `map.c`), the objects and characters' sprites (`map_objects.c`, `actor_control.c`,
 `src/main/gfx/sprite_drawer.c`, `tim_loader.c`, `src/main/file/decompressor.c`), the
 text (`src/main/text/font.c`, `text_tools.c`, `text_window.c`) and the tables' layouts
-(`include/field_map.h`, `include/dw3/game_state.h`).
+(`include/field_map.h`, `include/dw3/game_state.h`). `src/core/codes.cpp` ports the
+conditions and actions (`src/main/game/events.c`, its special conditions and their
+tables, `src/main/game/party.c`), and `src/core/game_codes.inc` is written from the
+stages' code (`src/stages/`) by `tools/game_codes.py`.
 
 ```
 MIT License

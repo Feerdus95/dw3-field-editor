@@ -229,7 +229,8 @@ go to every language's names. It runs the
 code of the field it came from: its sprites, music and texts, and its events, which check
 the story as they do there. To reach it in the game, **Reach it from** leads one of the
 open field's exits to it as it is made, or lead an exit of any field to it later (it is
-in the exits' list); Test in game opens it directly. **File > Delete this new
+in the exits' list); Test in game opens it directly. A new field has no "visited" flag
+(the game has one for the modes up to 0x2EF only). **File > Delete this new
 field** removes it and its files.
 
 ### What saving writes
@@ -260,13 +261,16 @@ tiles.
     dw3fe [wstag330]                   opens the editor (and a field)
     dw3fe --data DIR                   the port's data folder
     dw3fe --shot out.png wstag330      draws a field's map to a picture and exits
-    dw3fe --check                      reads every field and prints what it found
+    dw3fe --check                      reads every field and prints what it found,
+                                       and the conditions and actions left as numbers
     dw3fe --selftest                   checks what saving rests on, over every field:
                                        each logic map, background tile, text and event
                                        script written and read back, the maps resized
                                        back and forth, a sprite imported
     dw3fe wstag245 --select actor:19   opens a field with something selected
                                        (actor:N, slot:N, object:N, event:N, start)
+         [--window-shot out.png]       and saves the window and its properties
+                                       (out-props.png) as drawn, then exits
     dw3fe --new-field wstag330 [--size 8x6] [--background picture.png]
                                        makes a new field from one: a copy, or an
                                        empty map of 8 x 6 tiles, its background a
@@ -299,6 +303,13 @@ tiles.
    This writes `build/dw3fe.exe` with every DLL it needs next to it, so the folder runs
    on its own. `python build.py --clean` builds from scratch. MSYS2 is found at
    `C:\msys64`, or wherever `MSYS2_DIR` says.
+
+### The game's codes
+
+`src/core/game_codes.inc`, the story's steps (the event that moves the story on to each
+point) and the flags the game's code sets and checks, is written from dw3_decomp's C:
+
+    python tools/game_codes.py [path/to/dw3_decomp]
 
 ### Making a release
 
