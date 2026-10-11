@@ -3,6 +3,8 @@
 #include <QImage>
 #include <QMainWindow>
 #include <QRect>
+#include <functional>
+#include <map>
 #include <vector>
 #include "field.h"
 #include "text.h"
@@ -24,8 +26,12 @@ class QTreeWidget;
 class QTreeWidgetItem;
 class QUndoStack;
 
+QImage toQImage(const Image &img);
+/* A picture as the editor's, w x h: what it lacks is clear */
+Image fromQImage(const QImage &q, int w, int h);
+
 /* What a map item is, in its data(0) and data(1) */
-enum ItemKind { KIND_NONE, KIND_ACTOR, KIND_SLOT, KIND_OBJECT, KIND_START, KIND_BATTLES };
+enum ItemKind { KIND_NONE, KIND_ACTOR, KIND_SLOT, KIND_OBJECT, KIND_START, KIND_BATTLES, KIND_EVENT };
 
 /* The layers the user turns on and off */
 enum Layer { L_BACKGROUND, L_OBJECTS, L_FLOOR, L_TRIGGERS, L_AREAS, L_ACTORS, L_EXITS, L_START, LAYER_COUNT };
@@ -38,12 +44,33 @@ class MainWindow : public QMainWindow {
   public:
     MainWindow(const Files &files, std::vector<Stage> stages, const GameText &text, std::vector<int> animFiles);
     void openStage(const QString &name);
+    /* an object at `at` showing a picture (count frames side by side), an
+       undo step; false (and why, shown or in err) when it can't be */
+    bool addObjectFromFile(const QString &path, int count, QPointF at, QString *err = nullptr);
+    bool save();
     /* selects "actor:N", "slot:N", "object:N" or "start" (the command line's --select) */
     void selectByName(const QString &what);
 
     /* the undo commands' way in */
     void setTables(const Stage &s);
     void setMapRegion(int map, const QRect &r, const std::vector<uint8_t> &px);
+    /* the whole map: its grid, background, logic maps and tables */
+    struct MapState {
+        int tilesW, tilesH;
+        std::vector<Image> tiles[3];
+        std::vector<std::vector<uint8_t>> tileData;
+        LogicMap maps[8];
+        Stage stage;
+        int shiftX, shiftY;
+        bool bgEdited;
+        std::vector<uint8_t> sheetFile, imagesData;
+        bool sheetEdited, imagesEdited;
+    };
+    MapState mapState() const;
+    void setMapState(const MapState &m);
+    /* the text files edited, by fid: their strings */
+    using Texts = std::map<int, std::vector<std::vector<uint8_t>>>;
+    void setTexts(const Texts &t);
 
   protected:
     void closeEvent(QCloseEvent *e) override;
@@ -87,10 +114,49 @@ class MainWindow : public QMainWindow {
     void endStroke(QPointF p);
     void fillRect(const QRect &r, int value);
     void updateOverlayRect(int map, const QRect &r);
-    bool save();
     bool maybeSave();
     void revertStage();
     void testInGame();
+
+    /* the map as a whole (Map menu) and new fields */
+    void resizeMap();
+    void importBackground();
+    void exportBackground();
+    void newField();
+    /* applies change to the map as one undo step; false (and nothing changed) when it fails */
+    bool changeMap(const QString &what, const std::function<bool(QString *err)> &change);
+    bool canEditBackground();
+    /* the stage with its saved changes; a new field's file is the whole of it */
+    Stage savedStage(int index) const;
+    void rebuildModes();
+
+    /* the texts: a text file's strings by its key, fid << 16 for a text file,
+       and | entry + 1 for one in an archive (the events') */
+    std::vector<std::vector<uint8_t>> textStrings(int key) const;
+    /* the key of the field's talk file, and of an event's texts, in a language */
+    int talkKey(int lang) const;
+    int eventKey(int text, int lang) const;
+    void reloadTalks();
+    void setLanguage(int lang);
+    /* the dialog that writes a string; false when cancelled */
+    bool textDialog(GameString &g, const QString &title, const QString &note);
+    /* edits string entry of a text file (an undo step) */
+    void editString(int key, int entry, const QString &note);
+    /* a new string at the end of a text file, in every language: its entry, or -1; then runs in the
+       same undo step (to use the entry) */
+    int appendString(const std::function<int(int lang)> &keyOf, const GameString &start, const QString &note,
+                     const std::function<void(int entry)> &then = nullptr);
+    void editTalkText(int entry);
+    void newTalkText(int actor, int talk);
+    /* a name added to a names file (AREA_NAMES_FILE...) in every language, written at once: its index, or -1 */
+    int addName(int english, const QString &name, QString *err);
+
+    /* the events */
+    QString characterName(int id) const;
+    void addEvent(QPointF at);
+    void addPictureObject(QPointF at);
+    void showEventMarks();
+    std::vector<QGraphicsItem *> eventMarks_;
 
     /* the properties (properties.cpp) */
     void showProperties();
@@ -100,6 +166,7 @@ class MainWindow : public QMainWindow {
     void startForm(QFormLayout *f);
     void stageForm(QFormLayout *f);
     void battlesForm(QFormLayout *f);
+    void eventForm(QFormLayout *f, int index);
     QLabel *richLabel(const QString &html);
     void linkClicked(const QString &link);
 
@@ -108,10 +175,13 @@ class MainWindow : public QMainWindow {
     GameText text_;
     std::vector<int> animFiles_; /* by character: its animation file entry */
     QHash<int, int> modeStage_; /* mode -> index in stages_ */
+    int savedShiftX_ = 0, savedShiftY_ = 0; /* field_.shift at the last save: the exits arriving here are moved by the rest */
 
     Field field_;            /* the open field, its tables as edited */
     Stage original_;         /* its tables as the game has them */
-    std::vector<std::string> talks_; /* the stage's text file */
+    std::vector<std::string> talks_; /* the stage's text file, in the language shown */
+    Texts texts_;                    /* the text files edited since the field opened */
+    int textLimit_ = 0;              /* the widest line of the stage's text file, in pixels */
     std::vector<QRect> slotCells_;   /* each slot's trigger cells: their bounds */
     bool mapEdited_[8] = {};
 
@@ -140,6 +210,7 @@ class MainWindow : public QMainWindow {
     int selKind_ = KIND_NONE, selIndex_ = -1;
 
     QUndoStack *undo_;
+    QAction *revertAct_ = nullptr;
     int tool_ = TOOL_SELECT;
     QAction *toolActions_[TOOL_COUNT] = {};
     QToolBar *paintBar_;

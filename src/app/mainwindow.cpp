@@ -4,6 +4,9 @@
 #include <QApplication>
 #include <QCloseEvent>
 #include <QComboBox>
+#include <QCompleter>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QDockWidget>
 #include <QFileDialog>
@@ -20,11 +23,17 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPainter>
+#include <QInputDialog>
+#include <QPlainTextEdit>
 #include <QProcess>
+#include <QRadioButton>
+#include <QRegularExpression>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSettings>
 #include <QSlider>
+#include <QSpinBox>
+#include <QFormLayout>
 #include <QStatusBar>
 #include <QTimer>
 #include <QToolBar>
@@ -42,13 +51,23 @@
 const char *SLOT_TYPES[15] = {"none",  "Exit", "Climb up", "Climb down", "Drop",       "Depth",  "Map change", "Gauge",
                               "Event", "Warp", "Warp",     "Slide",      "Stop slide", "Launch", "Launch out"};
 QString slotType(int t) { return t >= 0 && t < 15 ? SLOT_TYPES[t] : "?"; }
+QString commandName(int op); /* properties.cpp */
 /* the slot types whose arg is a mode to go to */
-bool leaves(int t) { return t == 1 || t == 9 || t == 10 || t == 13 || t == 14; }
+bool leaves(int t) { return slot_leaves(t); }
 const char *DIRS[8] = {"S", "SW", "W", "NW", "N", "NE", "E", "SE"};
 
 QImage toQImage(const Image &img) {
     if (!img.w) return QImage();
     return QImage((const uchar *)img.px.data(), img.w, img.h, img.w * 4, QImage::Format_RGBA8888).copy();
+}
+
+Image fromQImage(const QImage &q, int w, int h) {
+    Image out;
+    out.resize(w, h);
+    QImage c = q.convertToFormat(QImage::Format_RGBA8888);
+    for (int y = 0; y < std::min(h, c.height()); y++)
+        memcpy(&out.px[(size_t)y * w], c.constScanLine(y), (size_t)std::min(w, c.width()) * 4);
+    return out;
 }
 
 static QColor slotColor(int i) {
@@ -106,13 +125,49 @@ class PaintCommand : public QUndoCommand {
     bool first_ = true;
 };
 
+/* A change to the map as a whole (its size, its background): the whole map
+   before and after; the change is done already when it is pushed */
+class MapCommand : public QUndoCommand {
+  public:
+    MapCommand(MainWindow *w, MainWindow::MapState before, MainWindow::MapState after, const QString &what)
+        : QUndoCommand(what), w_(w), before_(std::move(before)), after_(std::move(after)) {}
+    void redo() override {
+        if (first_) first_ = false;
+        else w_->setMapState(after_);
+    }
+    void undo() override { w_->setMapState(before_); }
+
+  private:
+    MainWindow *w_;
+    MainWindow::MapState before_, after_;
+    bool first_ = true;
+};
+
+/* A change to the text files: the edited ones before and after */
+class TextCommand : public QUndoCommand {
+  public:
+    TextCommand(MainWindow *w, MainWindow::Texts before, MainWindow::Texts after, const QString &what)
+        : QUndoCommand(what), w_(w), before_(std::move(before)), after_(std::move(after)) {}
+    void redo() override { w_->setTexts(after_); }
+    void undo() override { w_->setTexts(before_); }
+
+  private:
+    MainWindow *w_;
+    MainWindow::Texts before_, after_;
+};
+
 /* --- the window --- */
+
+void MainWindow::rebuildModes() {
+    modeStage_.clear();
+    for (int i = 0; i < (int)stages_.size(); i++)
+        for (auto &m : stages_[i].modes) modeStage_.insert(m.mode, i);
+}
 
 MainWindow::MainWindow(const Files &files, std::vector<Stage> stages, const GameText &text, std::vector<int> animFiles)
     : files_(files), stages_(std::move(stages)), text_(text), animFiles_(std::move(animFiles)) {
     setWindowTitle("DW3 Field Editor");
-    for (int i = 0; i < (int)stages_.size(); i++)
-        for (auto &m : stages_[i].modes) modeStage_.insert(m.mode, i);
+    rebuildModes();
     undo_ = new QUndoStack(this);
     connect(undo_, &QUndoStack::cleanChanged, this, &MainWindow::updateTitle);
 
@@ -161,9 +216,11 @@ MainWindow::MainWindow(const Files &files, std::vector<Stage> stages, const Game
     QMenu *fileMenu = menuBar()->addMenu("&File");
     fileMenu->addAction("&Save", QKeySequence::Save, this, &MainWindow::save);
     QAction *test = fileMenu->addAction("&Test in game", QKeySequence("F5"), this, &MainWindow::testInGame);
-    test->setToolTip("Saves the field and opens the port on it (F5)");
+    test->setToolTip("Saves the field and opens the port on it (F5); with an event selected, the port plays it");
     fileMenu->addSeparator();
-    fileMenu->addAction("&Revert to the game's...", this, &MainWindow::revertStage);
+    fileMenu->addAction("&New field...", QKeySequence::New, this, &MainWindow::newField)
+        ->setToolTip("A field of your own: a copy of this one, or an empty map");
+    revertAct_ = fileMenu->addAction("&Revert to the game's...", this, &MainWindow::revertStage);
     fileMenu->addSeparator();
     fileMenu->addAction("&Quit", QKeySequence::Quit, this, &QWidget::close);
     QMenu *editMenu = menuBar()->addMenu("&Edit");
@@ -175,6 +232,14 @@ MainWindow::MainWindow(const Files &files, std::vector<Stage> stages, const Game
     editMenu->addAction(redoAct);
     editMenu->addSeparator();
     editMenu->addAction("&Delete", QKeySequence::Delete, this, &MainWindow::deleteSelection);
+    QMenu *mapMenu = menuBar()->addMenu("&Map");
+    mapMenu->addAction("&Resize...", this, &MainWindow::resizeMap)
+        ->setToolTip("Add or take away 128-pixel tiles on any side; what is on the map moves with it");
+    mapMenu->addSeparator();
+    mapMenu->addAction("&Export background...", this, &MainWindow::exportBackground)
+        ->setToolTip("The background's three depths as pictures, to draw over");
+    mapMenu->addAction("&Import background...", this, &MainWindow::importBackground)
+        ->setToolTip("The background from pictures: the three depths exported, or one picture for the whole of it");
 
     /* the tools */
     QToolBar *tools = addToolBar("Tools");
@@ -233,6 +298,18 @@ MainWindow::MainWindow(const Files &files, std::vector<Stage> stages, const Game
     viewMenu->addAction("Zoom &in", QKeySequence::ZoomIn, [this] { view_->zoomBy(1.25); });
     viewMenu->addAction("Zoom &out", QKeySequence::ZoomOut, [this] { view_->zoomBy(0.8); });
     viewMenu->addAction("&Actual size", QKeySequence("1"), [this] { view_->zoomBy(1 / view_->zoom()); });
+    viewMenu->addSeparator();
+    QMenu *langMenu = viewMenu->addMenu("Text &language");
+    langMenu->setToolTipsVisible(true);
+    auto *langGroup = new QActionGroup(this);
+    for (int l = 0; l < LANG_COUNT; l++) {
+        QAction *a = langMenu->addAction(LANGUAGE_NAMES[l]);
+        a->setCheckable(true);
+        a->setChecked(l == text_.lang);
+        a->setToolTip("The language of the texts shown and written: the lines, the names, the items");
+        langGroup->addAction(a);
+        connect(a, &QAction::triggered, this, [this, l] { setLanguage(l); });
+    }
     viewMenu->addSeparator();
     tb->addAction(fit);
     tb->addSeparator();
@@ -356,7 +433,7 @@ MainWindow::MainWindow(const Files &files, std::vector<Stage> stages, const Game
 
 void MainWindow::selectByName(const QString &what) {
     QStringList p = what.split(':');
-    static const QStringList KINDS{"", "actor", "slot", "object", "start"};
+    static const QStringList KINDS{"", "actor", "slot", "object", "start", "battles", "event"};
     int kind = (int)KINDS.indexOf(p[0]);
     if (kind > 0) select(kind, p.size() > 1 ? p[1].toInt() : 0, true);
 }
@@ -386,7 +463,7 @@ QString MainWindow::stageTitle(const Stage &s) const {
     const Stage::Mode &m = s.modes[0];
     QString place = m.place < (int)text_.places.size() ? QString::fromStdString(text_.places[m.place]) : "";
     if (place.isEmpty()) place = QString::fromStdString(s.name);
-    return place;
+    return s.isNew() ? place + " (new)" : place;
 }
 
 QString MainWindow::modeName(int mode) const {
@@ -396,6 +473,7 @@ QString MainWindow::modeName(int mode) const {
         if (m.mode == mode) {
             QString area = m.area < (int)text_.areas.size() ? QString::fromStdString(text_.areas[m.area]) : "";
             QString place = m.place < (int)text_.places.size() ? QString::fromStdString(text_.places[m.place]) : "";
+            if (s.isNew()) place += " (new)";
             return area.isEmpty() || area == place ? place : place + ", " + area;
         }
     return stageTitle(s);
@@ -423,12 +501,14 @@ void MainWindow::buildStageTree() {
             a->setFont(0, f);
             a->setFlags(Qt::ItemIsEnabled);
         }
-        QString num = QString::fromStdString(s.name).mid(5);
+        QString num = s.isNew() ? QString::fromStdString(s.name).mid(3) : QString::fromStdString(s.name).mid(5);
         auto *it = new QTreeWidgetItem(a, {stageTitle(s)});
         QStringList modes;
         for (auto &m : s.modes) modes << QString::number(m.mode);
-        it->setToolTip(0, QString("%1 · WSTAG%2 · mode %3").arg(stageTitle(s), num, modes.join(", ")));
+        it->setToolTip(0, s.isNew() ? QString("%1 · a new field, on %2's code · mode %3").arg(stageTitle(s), QString::fromStdString(s.templ).toUpper(), modes.join(", "))
+                                    : QString("%1 · WSTAG%2 · mode %3").arg(stageTitle(s), num, modes.join(", ")));
         it->setData(0, Qt::UserRole, QString::fromStdString(s.name));
+        it->setData(0, Qt::UserRole + 1, num);
     }
     stageTree_->sortItems(0, Qt::AscendingOrder);
     /* places with the same name (the two servers' copies, story copies) tell their numbers */
@@ -438,7 +518,7 @@ void MainWindow::buildStageTree() {
         for (int k = 0; k < a->childCount(); k++) count[a->child(k)->text(0)]++;
         for (int k = 0; k < a->childCount(); k++)
             if (count[a->child(k)->text(0)] > 1)
-                a->child(k)->setText(0, a->child(k)->text(0) + "  (" + a->child(k)->data(0, Qt::UserRole).toString().mid(5) + ")");
+                a->child(k)->setText(0, a->child(k)->text(0) + "  (" + a->child(k)->data(0, Qt::UserRole + 1).toString() + ")");
     }
 }
 
@@ -457,22 +537,17 @@ void MainWindow::openStage(const QString &name) {
     }
     QApplication::setOverrideCursor(Qt::WaitCursor);
     original_ = *st;
-    Stage edited = *st;
-    std::ifstream mod(files_.stageModPath(st->name), std::ios::binary);
-    if (mod) {
-        std::stringstream ss;
-        ss << mod.rdbuf();
-        Json j;
-        if (Json::parse(ss.str(), j)) edited.loadSections(j);
-        else statusBar()->showMessage("The field's saved changes can't be read: " + QString::fromStdString(files_.stageModPath(st->name)), 8000);
-    }
+    Stage edited = savedStage((int)(st - stages_.data()));
     field_ = Field();
+    savedShiftX_ = savedShiftY_ = 0;
+    revertAct_->setText(st->isNew() ? "&Delete this new field..." : "&Revert to the game's...");
     if (!field_.load(files_, edited, &animFiles_)) {
         QApplication::restoreOverrideCursor();
         QMessageBox::warning(this, "Can't open the field", QString::fromStdString(field_.error));
         return;
     }
-    talks_ = text_.stageText(files_, st->textFile);
+    texts_.clear();
+    reloadTalks();
     QSettings().setValue("stage", name);
     floor_ = 0;
     highlightSlot_ = -1;
@@ -496,6 +571,20 @@ void MainWindow::openStage(const QString &name) {
             QSignalBlocker b(stageTree_);
             stageTree_->setCurrentItem(*it);
         }
+}
+
+Stage MainWindow::savedStage(int index) const {
+    Stage s = stages_[index];
+    if (s.isNew()) return s; /* its file is the whole of it, read already */
+    std::ifstream mod(files_.stageModPath(s.name), std::ios::binary);
+    if (mod) {
+        std::stringstream ss;
+        ss << mod.rdbuf();
+        Json j;
+        if (Json::parse(ss.str(), j)) s.loadSections(j);
+        else statusBar()->showMessage("The field's saved changes can't be read: " + QString::fromStdString(files_.stageModPath(s.name)), 8000);
+    }
+    return s;
 }
 
 /* Each slot's trigger cells, their bounds */
@@ -613,6 +702,7 @@ void MainWindow::applyStoryPoint() {
 
 void MainWindow::buildScene() {
     syncing_ = true;
+    eventMarks_.clear();
     scene_->clear();
     for (auto &v : layerItems_) v.clear();
     for (auto &o : overlay_) o = nullptr;
@@ -862,6 +952,14 @@ void MainWindow::fillEntities() {
         auto *it = new QTreeWidgetItem(g, {what, QString("%1, %2").arg(o.x).arg(o.y)});
         it->setData(0, Qt::UserRole, KIND_OBJECT), it->setData(0, Qt::UserRole + 1, i);
     }
+    g = group("Events", (int)s.events.size());
+    for (int i = 0; i < (int)s.events.size(); i++) {
+        const Event &e = s.events[i];
+        QString what = QString("Event %1").arg(e.id);
+        QString how = e.scripted ? QString("%1 commands").arg(parse_script(e.script).size()) : "code";
+        auto *it = new QTreeWidgetItem(g, {what, how});
+        it->setData(0, Qt::UserRole, KIND_EVENT), it->setData(0, Qt::UserRole + 1, i);
+    }
     int areas = 0;
     for (auto &p : s.places)
         for (auto &a : p.areas) areas += a.rate != 0;
@@ -886,6 +984,7 @@ void MainWindow::select(int kind, int index, bool center) {
         if (me) target = it;
     }
     if (center && target) view_->centerOn(target);
+    showEventMarks();
     /* the triggers' highlight follows the selected slot */
     int hl = kind == KIND_SLOT ? index : -1;
     if (hl != highlightSlot_) {
@@ -920,7 +1019,8 @@ void MainWindow::setTables(const Stage &s) {
     fillEntities();
     /* the selection stays when its item still is */
     bool still = (kind == KIND_ACTOR && index < (int)s.actors.size()) || (kind == KIND_SLOT && index < (int)s.slots.size()) ||
-                 (kind == KIND_OBJECT && index < (int)s.objects.size()) || kind == KIND_START || kind == KIND_BATTLES;
+                 (kind == KIND_OBJECT && index < (int)s.objects.size()) || (kind == KIND_EVENT && index < (int)s.events.size()) ||
+                 kind == KIND_START || kind == KIND_BATTLES;
     select(still ? kind : KIND_NONE, still ? index : -1, false);
     updateTitle();
 }
@@ -970,6 +1070,15 @@ void MainWindow::deleteSelection() {
     } else if (selKind_ == KIND_OBJECT && selIndex_ >= 0 && selIndex_ < (int)s.objects.size()) {
         s.objects.erase(s.objects.begin() + selIndex_);
         changeTables(s, "Delete an object");
+    } else if (selKind_ == KIND_EVENT && selIndex_ >= 0 && selIndex_ < (int)s.events.size()) {
+        int used = 0;
+        for (const Slot &t : s.slots) used += t.type == 8 && (int16_t)t.arg == s.events[selIndex_].id;
+        if (used && QMessageBox::question(this, "Delete an event",
+                                          QString("%1 slots start this event: they'd start nothing. Delete it?").arg(used)) !=
+                        QMessageBox::Yes)
+            return;
+        s.events.erase(s.events.begin() + selIndex_);
+        changeTables(s, "Delete an event");
     } else if (selKind_ == KIND_SLOT && selIndex_ >= 0) {
         /* trigger cells name slots by number: only the last one, without cells, can go */
         if (selIndex_ != (int)s.slots.size() - 1 || (selIndex_ < 32 && !slotCells_[selIndex_].isNull())) {
@@ -1059,6 +1168,9 @@ void MainWindow::contextMenu(QPointF p, QPoint global) {
         changeTables(s, "Add a slot");
         select(KIND_SLOT, (int)s.slots.size() - 1, false);
     });
+    menu.addAction("Add an object from a picture...", [this, p] { addPictureObject(p); })
+        ->setToolTip("A sprite of your own: a picture, or the frames of an animation side by side");
+    menu.addAction("Add an event", [this, p] { addEvent(p); })->setToolTip("A script that a slot of type Event or a line starts");
     menu.addAction("Move the start here", [this, x, y] {
         Stage s = field_.stage;
         s.startX = x * 256, s.startY = y * 256;
@@ -1227,31 +1339,28 @@ void MainWindow::endStroke(QPointF p) {
    mods/stages/<stage>.json, the logic maps into mods/<fid>.bin, a copy of the
    game's file with the edited maps in it; what is as the game has it leaves
    no file */
+static bool write_text(const QString &path, const std::string &text) {
+    QFile f(path);
+    return f.open(QIODevice::WriteOnly) && f.write(text.data(), (qint64)text.size()) == (qint64)text.size();
+}
+
 bool MainWindow::save() {
     if (field_.stage.name.empty()) return true;
+    const Stage &st = field_.stage;
     QDir().mkpath(QString::fromStdString(files_.dir + "/mods/stages"));
-    QString modPath = QString::fromStdString(files_.stageModPath(field_.stage.name));
-    std::string json = stage_mod_json(field_.stage, original_);
-    if (json.empty()) QFile::remove(modPath);
-    else {
-        QFile f(modPath);
-        if (!f.open(QIODevice::WriteOnly) || f.write(json.data(), (qint64)json.size()) != (qint64)json.size()) {
-            QMessageBox::critical(this, "Save", "Can't write " + modPath);
-            return false;
-        }
-    }
-    /* the logic maps, by their file */
+    /* the logic maps first, by their file: the game's file with the edited
+       maps in it (a new field's is its own copy) */
     std::map<int, std::map<int, std::vector<uint8_t>>> byFile;
     std::set<int> fids;
     for (int i = 0; i < 8; i++) {
-        if (!field_.stage.mapFiles[i] || !field_.maps[i].w) continue;
-        int fid = field_.stage.mapFiles[i] >> 16, entry = field_.stage.mapFiles[i] & 0xFFFF;
+        if (!st.mapFiles[i] || !field_.maps[i].w) continue;
+        int fid = st.mapFiles[i] >> 16, entry = st.mapFiles[i] & 0xFFFF;
         fids.insert(fid);
         std::vector<uint8_t> orig = files_.readOriginal(fid);
         size_t n;
         const uint8_t *e = archive_entry(orig, entry, &n);
         LogicMap om;
-        if (e && om.load(e, n) && om.px == field_.maps[i].px) continue;
+        if (e && om.load(e, n) && om.w == field_.maps[i].w && om.px == field_.maps[i].px) continue;
         std::string err;
         std::vector<uint8_t> enc = field_.maps[i].encode(&err);
         if (enc.empty()) {
@@ -1261,16 +1370,100 @@ bool MainWindow::save() {
         }
         byFile[fid][entry] = enc;
     }
+    /* the sprite sheet, an entry of the same file: with the frames imported
+       (now or before) whenever it isn't the game's */
+    if (st.sheetEntry) {
+        size_t n, on = 0;
+        std::vector<uint8_t> orig = files_.readOriginal(st.sheetEntry >> 16);
+        const uint8_t *e = archive_entry(field_.sheetFile_, st.sheetEntry & 0xFFFF, &n);
+        const uint8_t *o = archive_entry(orig, st.sheetEntry & 0xFFFF, &on);
+        if (e && !(o && on >= n && memcmp(e, o, n) == 0)) {
+            byFile[st.sheetEntry >> 16][st.sheetEntry & 0xFFFF].assign(e, e + n);
+            fids.insert(st.sheetEntry >> 16);
+        }
+    }
+    /* the objects' images, to the field's own file */
+    if (field_.imagesEdited && !files_.write(st.imageFile, field_.imagesData)) {
+        QMessageBox::critical(this, "Save", QString("Can't write mods/%1.bin").arg(st.imageFile, 4, 10, QChar('0')));
+        return false;
+    }
     for (int fid : fids) {
-        if (byFile[fid].empty()) files_.remove(fid);
-        else if (!files_.write(fid, rebuild_archive(files_.readOriginal(fid), byFile[fid]))) {
+        std::vector<uint8_t> base = files_.readOriginal(fid);
+        if (byFile[fid].empty() && !base.empty()) files_.remove(fid);
+        else if (!byFile[fid].empty() && !files_.write(fid, rebuild_archive(base.empty() ? files_.read(fid) : base, byFile[fid]))) {
             QMessageBox::critical(this, "Save", QString("Can't write mods/%1.bin").arg(fid, 4, 10, QChar('0')));
             return false;
         }
     }
+    /* the background, to the field's own file */
+    if (field_.bgEdited && st.mapFile && !files_.write(st.mapFile, field_.mapFileData())) {
+        QMessageBox::critical(this, "Save", QString("Can't write mods/%1.bin").arg(st.mapFile, 4, 10, QChar('0')));
+        return false;
+    }
+    /* the texts: each file edited, the game's again when it is the same; the
+       events' are entries of archives */
+    std::map<int, std::map<int, std::vector<uint8_t>>> entries;
+    for (auto &[key, strings] : texts_)
+        if ((key & 0xFFFF) != 0) entries[key >> 16][(key & 0xFFFF) - 1] = build_text_file(strings, false);
+    for (auto &[fid, repl] : entries) {
+        std::vector<uint8_t> data = rebuild_archive(files_.read(fid), repl), orig = files_.readOriginal(fid);
+        if (data == orig) files_.remove(fid);
+        else if (!files_.write(fid, data)) {
+            QMessageBox::critical(this, "Save", QString("Can't write mods/%1.bin").arg(fid, 4, 10, QChar('0')));
+            return false;
+        }
+    }
+    for (auto &[key, strings] : texts_) {
+        if (key & 0xFFFF) continue;
+        int fid = key >> 16;
+        std::vector<uint8_t> data = build_text_file(strings), orig = files_.readOriginal(fid);
+        if (data == orig) files_.remove(fid);
+        else if (!files_.write(fid, data)) {
+            QMessageBox::critical(this, "Save", QString("Can't write mods/%1.bin").arg(fid, 4, 10, QChar('0')));
+            return false;
+        }
+    }
+    /* the tables: a new field's file is the whole of it */
+    QString modPath = QString::fromStdString(files_.stageModPath(st.name));
+    std::string json = st.isNew() ? new_field_json(st) : stage_mod_json(st, original_);
+    if (json.empty()) QFile::remove(modPath);
+    else if (!write_text(modPath, json)) {
+        QMessageBox::critical(this, "Save", "Can't write " + modPath);
+        return false;
+    }
+    if (st.isNew()) {
+        original_ = st;
+        stages_[modeStage_[st.modes[0].mode]] = st;
+    }
+    /* the exits of every field that arrive here, moved as the map's content moved */
+    int dx = field_.shiftX - savedShiftX_, dy = field_.shiftY - savedShiftY_, moved = 0;
+    for (int k = 0; (dx || dy) && k < (int)stages_.size(); k++) {
+        if (stages_[k].name == st.name) continue;
+        Stage s = savedStage(k);
+        bool changed = false;
+        for (Slot &t : s.slots)
+            for (auto &m : st.modes)
+                if (slot_leaves(t.type) && (int16_t)t.arg == m.mode) {
+                    t.x = (t.x + dx) & 0xFFFF, t.y = (t.y + dy) & 0xFFFF;
+                    changed = true, moved++;
+                    break;
+                }
+        if (!changed) continue;
+        QString path = QString::fromStdString(files_.stageModPath(s.name));
+        std::string j = s.isNew() ? new_field_json(s) : stage_mod_json(s, stages_[k]);
+        if (s.isNew()) stages_[k] = s;
+        if (j.empty()) QFile::remove(path);
+        else if (!write_text(path, j)) {
+            QMessageBox::critical(this, "Save", "Can't write " + path);
+            return false;
+        }
+    }
+    savedShiftX_ = field_.shiftX, savedShiftY_ = field_.shiftY;
     undo_->setClean();
     updateTitle();
-    statusBar()->showMessage("Saved: the port loads these changes the next time it enters the field", 6000);
+    statusBar()->showMessage(QString("Saved: the port loads these changes the next time it enters the field%1")
+                                 .arg(moved ? QString("; %1 exits of other fields that arrive here moved with the map").arg(moved) : ""),
+                             8000);
     return true;
 }
 
@@ -1289,13 +1482,42 @@ bool MainWindow::maybeSave() {
 
 void MainWindow::revertStage() {
     if (field_.stage.name.empty()) return;
+    const Stage &st = field_.stage;
+    if (st.isNew()) {
+        int arrive = 0;
+        for (int k = 0; k < (int)stages_.size(); k++)
+            for (const Slot &t : savedStage(k).slots) arrive += slot_leaves(t.type) && (int16_t)t.arg == st.modes[0].mode && stages_[k].name != st.name;
+        if (QMessageBox::question(this, "Delete this new field",
+                                  QString("Delete %1 and its files for good?%2")
+                                      .arg(modeName(st.modes[0].mode),
+                                           arrive ? QString("\n\n%1 exits of other fields lead here: change them, or the game "
+                                                            "hangs when they are used.").arg(arrive)
+                                                  : "")) != QMessageBox::Yes)
+            return;
+        QFile::remove(QString::fromStdString(files_.stageModPath(st.name)));
+        files_.remove(own_tiles_fid(st));
+        files_.remove(own_tiles_fid(st) + 1);
+        files_.remove(own_images_fid(st));
+        QString templ = QString::fromStdString(st.templ);
+        stages_.erase(stages_.begin() + modeStage_[st.modes[0].mode]);
+        rebuildModes();
+        undo_->clear();
+        field_.stage.name.clear();
+        stageTree_->clear();
+        buildStageTree();
+        openStage(templ);
+        statusBar()->showMessage("The new field is deleted", 5000);
+        return;
+    }
     if (QMessageBox::question(this, "Revert to the game's",
                               "Delete every saved change to this field, and go back to the game's own?") != QMessageBox::Yes)
         return;
-    QFile::remove(QString::fromStdString(files_.stageModPath(field_.stage.name)));
+    QFile::remove(QString::fromStdString(files_.stageModPath(st.name)));
     for (int i = 0; i < 8; i++)
-        if (field_.stage.mapFiles[i]) files_.remove(field_.stage.mapFiles[i] >> 16);
-    QString name = QString::fromStdString(field_.stage.name);
+        if (st.mapFiles[i]) files_.remove(st.mapFiles[i] >> 16);
+    files_.remove(own_tiles_fid(st));
+    files_.remove(own_images_fid(st));
+    QString name = QString::fromStdString(st.name);
     undo_->clear();
     field_.stage.name.clear();
     openStage(name);
@@ -1318,9 +1540,598 @@ void MainWindow::testInGame() {
     settings.setValue("port", exe);
     QStringList args{"--field", QString::number(field_.stage.modes[0].mode)};
     if (storyBox_->currentData().toInt() >= 0) args << "--progress" << QString::number(storyBox_->currentData().toInt());
+    /* an event selected: the port starts it once the field runs */
+    if (selKind_ == KIND_EVENT && selIndex_ >= 0 && selIndex_ < (int)field_.stage.events.size())
+        args << "--event" << QString::number(field_.stage.events[selIndex_].id);
     if (!QProcess::startDetached(exe, args, QFileInfo(exe).absolutePath()))
         QMessageBox::critical(this, "Test in game", "Can't start " + exe);
     else statusBar()->showMessage("The port goes to this field once past its first screen", 6000);
+}
+
+/* --- the texts --- */
+
+std::vector<std::vector<uint8_t>> MainWindow::textStrings(int key) const {
+    auto it = texts_.find(key);
+    if (it != texts_.end()) return it->second;
+    int fid = key >> 16, entry = (key & 0xFFFF) - 1;
+    std::vector<uint8_t> f = files_.read(fid);
+    if (entry < 0) return read_raw_strings(f);
+    size_t n;
+    const uint8_t *e = archive_entry(f, entry, &n);
+    return e ? read_raw_strings(std::vector<uint8_t>(e, e + n)) : std::vector<std::vector<uint8_t>>();
+}
+
+int MainWindow::talkKey(int lang) const { return (field_.stage.textFile + lang) << 16; }
+
+/* an event's text: the archive (its fid less the language, plus LANGUAGE: 2
+   English) and its entry */
+int MainWindow::eventKey(int text, int lang) const { return ((text >> 16) + 2 + lang) << 16 | ((text & 0xFFFF) + 1); }
+
+void MainWindow::setTexts(const Texts &t) {
+    texts_ = t;
+    reloadTalks();
+    refreshItems();
+    fillEntities();
+    showProperties();
+    updateTitle();
+}
+
+/* The field's lines in the language shown, and the widest line they have */
+void MainWindow::reloadTalks() {
+    talks_.clear();
+    textLimit_ = 0;
+    if (field_.stage.name.empty()) return;
+    for (auto &s : textStrings(talkKey(text_.lang))) {
+        talks_.push_back(decode_text(s.data(), s.size()));
+        for (auto &page : text_widths(s, 0))
+            for (int w : page) textLimit_ = std::max(textLimit_, w);
+    }
+}
+
+void MainWindow::setLanguage(int lang) {
+    text_.load(files_, lang);
+    QSettings().setValue("language", lang);
+    reloadTalks();
+    stageTree_->clear();
+    buildStageTree();
+    refreshItems();
+    fillEntities();
+    showProperties();
+    updateTitle();
+    statusBar()->showMessage(QString("Texts in %1").arg(LANGUAGE_NAMES[lang]), 4000);
+}
+
+bool MainWindow::textDialog(GameString &g, const QString &title, const QString &note) {
+    QDialog d(this);
+    d.setWindowTitle(title);
+    d.resize(560, 420);
+    auto *form = new QFormLayout(&d);
+    form->addRow(richLabel(note));
+    auto *speaker = new QLineEdit(QString::fromStdString(g.speaker), &d);
+    speaker->setPlaceholderText("nobody: a sign, a thought");
+    form->addRow("Speaker", speaker);
+    auto *text = new QPlainTextEdit(QString::fromStdString(g.text), &d);
+    text->setFont(QFont("Consolas", 10));
+    form->addRow("Text", text);
+    form->addRow(richLabel("<span style='color:#999'>A line break is a new line, an empty line a new page; the box shows "
+                           "three lines a page. {player} is the player's name; other {..} are codes the editor keeps as "
+                           "they are.</span>"));
+    auto *check = new QLabel(&d);
+    check->setWordWrap(true);
+    form->addRow(check);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &d);
+    form->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &d, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &d, &QDialog::reject);
+    auto update = [&] {
+        std::string err;
+        GameString now{speaker->text().toStdString(), text->toPlainText().toStdString()};
+        std::vector<uint8_t> b = text_to_bytes(now, &err);
+        buttons->button(QDialogButtonBox::Ok)->setEnabled(err.empty());
+        if (!err.empty()) {
+            check->setText("<span style='color:#f66'>Can't be written: " + QString::fromStdString(err).toHtmlEscaped() + "</span>");
+            return;
+        }
+        QStringList warn;
+        auto pages = text_widths(b);
+        for (int p = 0; p < (int)pages.size(); p++) {
+            if ((int)pages[p].size() > TALK_LINES)
+                warn << QString("Page %1 has %2 lines: the game turns the page after the third.").arg(p + 1).arg(pages[p].size());
+            for (int l = 0; l < (int)pages[p].size(); l++)
+                if (textLimit_ && pages[p][l] > textLimit_)
+                    warn << QString("Page %1, line %2 is %3 pixels wide; the widest of this field's texts is %4.")
+                                .arg(p + 1).arg(l + 1).arg(pages[p][l]).arg(textLimit_);
+        }
+        check->setText(warn.isEmpty() ? "<span style='color:#7c7'>Fits the talk box.</span>"
+                                      : "<span style='color:#fc6'>" + warn.join("<br>") + "</span>");
+    };
+    connect(speaker, &QLineEdit::textChanged, &d, update);
+    connect(text, &QPlainTextEdit::textChanged, &d, update);
+    update();
+    if (d.exec() != QDialog::Accepted) return false;
+    g = {speaker->text().toStdString(), text->toPlainText().toStdString()};
+    return true;
+}
+
+void MainWindow::editString(int key, int entry, const QString &note) {
+    auto strings = textStrings(key);
+    if (entry < 0 || entry >= (int)strings.size()) return;
+    GameString g = bytes_to_text(strings[entry]);
+    if (!textDialog(g, "Edit the text", note)) return;
+    std::vector<uint8_t> b = text_to_bytes(g);
+    if (b == strings[entry]) return;
+    Texts after = texts_;
+    after[key] = strings;
+    after[key][entry] = b;
+    undo_->push(new TextCommand(this, texts_, after, "Edit a text"));
+}
+
+int MainWindow::appendString(const std::function<int(int lang)> &keyOf, const GameString &start, const QString &note,
+                             const std::function<void(int entry)> &then) {
+    GameString g = start;
+    if (!textDialog(g, "New text", note)) return -1;
+    std::vector<uint8_t> b = text_to_bytes(g);
+    Texts after = texts_;
+    int entry = -1;
+    for (int l = 0; l < LANG_COUNT; l++) {
+        int key = keyOf(l);
+        after[key] = textStrings(key);
+        if (entry < 0) entry = (int)after[key].size();
+        /* the same entry in every language */
+        if ((int)after[key].size() != entry) {
+            QMessageBox::warning(this, "New text", "The languages' copies of the text file differ in length.");
+            return -1;
+        }
+        after[key].push_back(b);
+    }
+    undo_->beginMacro("New text");
+    undo_->push(new TextCommand(this, texts_, after, "New text"));
+    if (then) then(entry);
+    undo_->endMacro();
+    return entry;
+}
+
+void MainWindow::editTalkText(int entry) {
+    /* who else says it: the file is shared by many fields */
+    int uses = 0, fields = 0;
+    for (int k = 0; k < (int)stages_.size(); k++) {
+        if (stages_[k].textFile != field_.stage.textFile) continue;
+        const Stage s = stages_[k].name == field_.stage.name ? field_.stage : savedStage(k);
+        int before = uses;
+        for (auto &a : s.actors)
+            for (auto &t : a.talks) uses += t.entry == entry;
+        fields += uses > before;
+    }
+    QString note = QString("Text %1 of the field's text file, in %2.").arg(entry).arg(LANGUAGE_NAMES[text_.lang]);
+    if (uses > 1 || fields > 1) note += QString(" <b>%1 lines in %2 fields say it</b>: they all change.").arg(uses).arg(fields);
+    editString(talkKey(text_.lang), entry, note);
+}
+
+void MainWindow::newTalkText(int actor, int talk) {
+    GameString g;
+    /* the speaker of the line it replaces */
+    auto strings = textStrings(talkKey(text_.lang));
+    int e = field_.stage.actors[actor].talks[talk].entry;
+    if (e >= 0 && e < (int)strings.size()) g.speaker = bytes_to_text(strings[e]).speaker;
+    appendString([this](int l) { return talkKey(l); }, g,
+                 "A new text at the end of the field's text file, for this line. It goes to every language as you write "
+                 "it here: switch the text language (View) to translate it.",
+                 [this, actor, talk](int entry) {
+                     Stage s = field_.stage;
+                     s.actors[actor].talks[talk].entry = entry;
+                     changeTables(s, "Change a line's text");
+                 });
+}
+
+int MainWindow::addName(int english, const QString &name, QString *err) {
+    std::string e;
+    std::vector<uint8_t> b = text_to_bytes({"", name.toStdString() + "{nowait}"}, &e);
+    if (!e.empty()) {
+        *err = QString::fromStdString(e);
+        return -1;
+    }
+    int index = -1;
+    for (int l = 0; l < LANG_COUNT; l++) {
+        auto strings = read_raw_strings(files_.read(english + l));
+        if (index < 0) index = (int)strings.size();
+        if ((int)strings.size() != index) {
+            *err = "the languages' name files differ in length";
+            return -1;
+        }
+        strings.push_back(b);
+        if (!files_.write(english + l, build_text_file(strings))) {
+            *err = QString("can't write mods/%1.bin").arg(english + l);
+            return -1;
+        }
+    }
+    text_.load(files_, text_.lang);
+    return index;
+}
+
+/* --- the events --- */
+
+void MainWindow::addEvent(QPointF at) {
+    Stage s = field_.stage;
+    int id = EDITOR_EVENTS;
+    for (bool used = true; used && id < EDITOR_EVENTS + 0x100;) {
+        used = false;
+        for (const Event &e : s.events) used |= e.id == id;
+        id += used;
+    }
+    if (id >= EDITOR_EVENTS + 0x100) {
+        QMessageBox::information(this, "Add an event", "The field has every event the editor can number.");
+        return;
+    }
+    /* the texts of the field's events, if it has any */
+    Event e;
+    e.id = id, e.scripted = true;
+    for (const Event &o : s.events)
+        if (o.text && !e.text) e.text = o.text;
+    /* the player walks to where it was asked for, and the event ends */
+    e.script = build_script({{0x102, {CHARACTER_PLAYER, qRound(at.x()), qRound(at.y()), 0}}, {0x302, {CHARACTER_PLAYER}}});
+    s.events.push_back(e);
+    changeTables(s, "Add an event");
+    select(KIND_EVENT, (int)s.events.size() - 1, false);
+}
+
+void MainWindow::addPictureObject(QPointF at) {
+    if (field_.stage.name.empty()) return;
+    QSettings settings;
+    QString path = QFileDialog::getOpenFileName(this, "A picture for the object", settings.value("pictures", QDir::homePath()).toString(),
+                                                "Pictures (*.png *.bmp)");
+    if (path.isEmpty()) return;
+    settings.setValue("pictures", QFileInfo(path).absolutePath());
+    QImage pic(path);
+    if (pic.isNull()) {
+        QMessageBox::warning(this, "Add an object", "Can't read " + path);
+        return;
+    }
+    bool ok;
+    int count = QInputDialog::getInt(this, "Add an object",
+                                     QString("The picture is %1 x %2 pixels. How many frames side by side? (1: a still "
+                                             "picture; more: an animation the object plays)")
+                                         .arg(pic.width()).arg(pic.height()),
+                                     1, 1, 32, 1, &ok);
+    if (ok) addObjectFromFile(path, count, at);
+}
+
+bool MainWindow::addObjectFromFile(const QString &path, int count, QPointF at, QString *errOut) {
+    QImage pic(path);
+    if (pic.isNull() || count < 1) {
+        if (errOut) *errOut = "can't read " + path;
+        return false;
+    }
+    int fw = pic.width() / count;
+    QString why;
+    return changeMap("Add an object from a picture", [&](QString *err) {
+        std::vector<Image> frames;
+        for (int i = 0; i < count; i++) frames.push_back(fromQImage(pic.copy(i * fw, 0, fw, pic.height()), fw, pic.height()));
+        std::string e;
+        int id = field_.importSprite(frames, &e);
+        if (id < 0) {
+            *err = "The picture can't be added: " + QString::fromStdString(e) + ".";
+            if (errOut) *errOut = *err, *err = QString(); /* told to the caller, not in a box */
+            return false;
+        }
+        /* the images are the field's own file from now on */
+        Stage &s = field_.stage;
+        s.imageFile = own_images_fid(s), s.imageEntry = 0;
+        Object o{1, 0, 64, 5, id, count > 1, id, id + count - 1, 8, 0, qRound(at.x()), qRound(at.y()), 0, 0};
+        s.objects.push_back(o);
+        return true;
+    });
+}
+
+/* The places the selected event's script names: where characters are put
+   and walk to, and where the camera goes, numbered by step */
+void MainWindow::showEventMarks() {
+    for (QGraphicsItem *it : eventMarks_) delete it;
+    eventMarks_.clear();
+    if (selKind_ != KIND_EVENT || selIndex_ < 0 || selIndex_ >= (int)field_.stage.events.size()) return;
+    auto commands = parse_script(field_.stage.events[selIndex_].script);
+    QPainterPath path;
+    for (int k = 0; k < (int)commands.size(); k++) {
+        const Command &c = commands[k];
+        int ax = -1;
+        if (c.op == 0x100 || c.op == 0x102) ax = 1;
+        else if (c.op == 0x601) ax = 1;
+        if (ax < 0 || (int)c.args.size() <= ax + 1) continue;
+        QPointF p(c.args[ax], c.args[ax + 1]);
+        QColor col = c.op == 0x601 ? QColor(120, 200, 255) : c.op == 0x100 ? QColor(255, 200, 60) : QColor(255, 120, 200);
+        auto *dot = scene_->addEllipse(-7, -7, 14, 14, QPen(Qt::black, 1), col);
+        dot->setPos(p);
+        dot->setZValue(1500);
+        dot->setFlag(QGraphicsItem::ItemIgnoresTransformations);
+        dot->setToolTip(QString("%1. %2 %3").arg(k + 1).arg(commandName(c.op)).arg(c.op == 0x601 ? "" : characterName(c.args[0])));
+        auto *num = new QGraphicsSimpleTextItem(QString::number(k + 1), dot);
+        num->setFont(QFont("Segoe UI", 7, QFont::Bold));
+        num->setPos(-num->boundingRect().width() / 2, -num->boundingRect().height() / 2);
+        eventMarks_.push_back(dot);
+        if (c.op != 0x601) path.isEmpty() ? path.moveTo(p) : path.lineTo(p);
+    }
+    if (!path.isEmpty()) {
+        auto *line = scene_->addPath(path, QPen(QColor(255, 120, 200, 200), 0, Qt::DashLine));
+        line->setZValue(1499);
+        eventMarks_.push_back(line);
+    }
+}
+
+/* --- the map as a whole --- */
+
+MainWindow::MapState MainWindow::mapState() const {
+    MapState m{field_.tilesW, field_.tilesH, {field_.tiles[0], field_.tiles[1], field_.tiles[2]}, field_.tileData, {},
+               field_.stage, field_.shiftX, field_.shiftY, field_.bgEdited, field_.sheetFile_, field_.imagesData,
+               field_.sheetEdited, field_.imagesEdited};
+    for (int i = 0; i < 8; i++) m.maps[i] = field_.maps[i];
+    return m;
+}
+
+void MainWindow::setMapState(const MapState &m) {
+    field_.tilesW = m.tilesW, field_.tilesH = m.tilesH;
+    for (int d = 0; d < 3; d++) field_.tiles[d] = m.tiles[d];
+    field_.tileData = m.tileData;
+    for (int i = 0; i < 8; i++) {
+        mapEdited_[i] |= field_.maps[i].px != m.maps[i].px;
+        field_.maps[i] = m.maps[i];
+    }
+    field_.stage = m.stage;
+    field_.shiftX = m.shiftX, field_.shiftY = m.shiftY, field_.bgEdited = m.bgEdited;
+    field_.sheetFile_ = m.sheetFile, field_.imagesData = m.imagesData;
+    field_.sheetEdited = m.sheetEdited, field_.imagesEdited = m.imagesEdited;
+    field_.reloadImages(files_, &animFiles_);
+    int kind = selKind_, index = selIndex_;
+    computeSlotCells();
+    buildActorGroups();
+    buildScene();
+    fillEntities();
+    select(kind, index, false);
+    refreshPaintOptions();
+    updateTitle();
+    view_->fit();
+}
+
+bool MainWindow::changeMap(const QString &what, const std::function<bool(QString *err)> &change) {
+    MapState before = mapState();
+    QString err;
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    bool ok = change(&err);
+    QApplication::restoreOverrideCursor();
+    if (!ok) {
+        setMapState(before);
+        if (!err.isEmpty()) QMessageBox::warning(this, what, err);
+        return false;
+    }
+    /* the background is the field's own file from now on (the game's are shared) */
+    if (field_.bgEdited && field_.stage.mapFile && !field_.stage.isNew()) field_.stage.mapFile = own_tiles_fid(field_.stage);
+    undo_->push(new MapCommand(this, std::move(before), mapState(), what));
+    setMapState(mapState());
+    return true;
+}
+
+bool MainWindow::canEditBackground() {
+    if (field_.stage.name.empty()) return false;
+    if (!field_.stage.mapFile) {
+        QMessageBox::information(this, "Background", "This field has no background of its own: the game draws its "
+                                                     "map with the field it belongs to.");
+        return false;
+    }
+    return true;
+}
+
+void MainWindow::resizeMap() {
+    if (field_.stage.name.empty()) return;
+    QDialog d(this);
+    d.setWindowTitle("Resize the map");
+    auto *form = new QFormLayout(&d);
+    form->addRow(richLabel(QString("The map is <b>%1 × %2</b> tiles of 128 pixels (%3 × %4). Add tiles on a side, or take "
+                                   "them away with a negative number.<br>What stands on the map moves with it, and so do the "
+                                   "exits of every field that arrive here.")
+                               .arg(field_.tilesW).arg(field_.tilesH).arg(field_.width()).arg(field_.height())));
+    QSpinBox *side[4];
+    static const char *SIDES[4] = {"Left", "Top", "Right", "Bottom"};
+    for (int k = 0; k < 4; k++) {
+        side[k] = new QSpinBox(&d);
+        side[k]->setRange(-((k & 1) ? field_.tilesH : field_.tilesW) + 1, 64);
+        form->addRow(SIDES[k], side[k]);
+    }
+    auto *result = new QLabel(&d);
+    form->addRow("Result", result);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &d);
+    form->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &d, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &d, &QDialog::reject);
+    auto update = [&] {
+        int w = field_.tilesW + side[0]->value() + side[2]->value(), h = field_.tilesH + side[1]->value() + side[3]->value();
+        bool ok = w >= 1 && h >= 1 && w * h <= MAX_TILES;
+        result->setText(QString("%1 × %2 tiles (%3 × %4 pixels)%5")
+                            .arg(w).arg(h).arg(w * 128).arg(h * 128)
+                            .arg(ok ? "" : QString(" — too big: the game takes at most %1 tiles").arg(MAX_TILES)));
+        buttons->button(QDialogButtonBox::Ok)->setEnabled(ok && (side[0]->value() || side[1]->value() || side[2]->value() || side[3]->value()));
+    };
+    for (QSpinBox *s : side) connect(s, &QSpinBox::valueChanged, &d, update);
+    update();
+    if (d.exec() != QDialog::Accepted) return;
+    int l = side[0]->value(), t = side[1]->value(), r = side[2]->value(), b = side[3]->value();
+    changeMap("Resize the map", [&](QString *) {
+        field_.resize(l, t, r, b);
+        return true;
+    });
+}
+
+/* The depths' pictures' names: base-back.png, base-middle.png, base-front.png (TILE_DEPTHS' order: 7, 3, 11) */
+static const char *DEPTH_NAMES[3] = {"middle", "front", "back"};
+
+void MainWindow::exportBackground() {
+    if (!canEditBackground()) return;
+    QSettings settings;
+    QString start = QDir(settings.value("pictures", QDir::homePath()).toString()).filePath(QString::fromStdString(field_.stage.name) + ".png");
+    QString path = QFileDialog::getSaveFileName(this, "Export the background", start, "PNG pictures (*.png)");
+    if (path.isEmpty()) return;
+    QString base = path.endsWith(".png", Qt::CaseInsensitive) ? path.left(path.size() - 4) : path;
+    settings.setValue("pictures", QFileInfo(path).absolutePath());
+    QStringList written;
+    for (int d = 0; d < 3; d++) {
+        QString p = base + "-" + DEPTH_NAMES[d] + ".png";
+        if (!toQImage(field_.layerImage(d)).save(p)) {
+            QMessageBox::critical(this, "Export the background", "Can't write " + p);
+            return;
+        }
+        written << QFileInfo(p).fileName();
+    }
+    QMessageBox::information(this, "Export the background",
+                             QString("Written: %1.\n\n"
+                                     "back: the ground, behind everything\n"
+                                     "middle: in front of the ground, behind the characters (unless a depth trigger puts "
+                                     "the player behind it)\n"
+                                     "front: over the characters (roofs, treetops)\n\n"
+                                     "Draw over them, keep the sizes, and import any of the three: the editor reads the "
+                                     "others next to it. Only the tiles that changed are made again.")
+                                 .arg(written.join(", ")));
+}
+
+void MainWindow::importBackground() {
+    if (!canEditBackground()) return;
+    QSettings settings;
+    QString path = QFileDialog::getOpenFileName(this, "Import the background", settings.value("pictures", QDir::homePath()).toString(),
+                                                "Pictures (*.png *.bmp *.jpg)");
+    if (path.isEmpty()) return;
+    settings.setValue("pictures", QFileInfo(path).absolutePath());
+    /* an exported set (base-back/middle/front.png): each one there; else one picture, the whole background */
+    QImage pics[3];
+    QRegularExpressionMatch m = QRegularExpression("^(.*)-(back|middle|front)\\.png$", QRegularExpression::CaseInsensitiveOption).match(path);
+    bool set = m.hasMatch();
+    if (set)
+        for (int d = 0; d < 3; d++) pics[d] = QImage(m.captured(1) + "-" + DEPTH_NAMES[d] + ".png");
+    else pics[0] = QImage(path);
+    QSize size;
+    for (auto &p : pics)
+        if (!p.isNull()) size = size.expandedTo(p.size());
+    if (size.isEmpty()) {
+        QMessageBox::warning(this, "Import the background", "Can't read " + path);
+        return;
+    }
+    int w = (size.width() + 127) / 128, h = (size.height() + 127) / 128;
+    if (w != field_.tilesW || h != field_.tilesH) {
+        if (w * h > MAX_TILES) {
+            QMessageBox::warning(this, "Import the background",
+                                 QString("The picture is %1 × %2 pixels: %3 × %4 tiles, and the game takes at most %5.")
+                                     .arg(size.width()).arg(size.height()).arg(w).arg(h).arg(MAX_TILES));
+            return;
+        }
+        if (QMessageBox::question(this, "Import the background",
+                                  QString("The picture is %1 × %2 pixels, the map %3 × %4. Make the map %5 × %6 tiles, on the "
+                                          "right and the bottom?")
+                                      .arg(size.width()).arg(size.height()).arg(field_.width()).arg(field_.height()).arg(w).arg(h)) !=
+            QMessageBox::Yes)
+            return;
+    }
+    int changed = 0;
+    if (!changeMap("Import the background", [&](QString *err) {
+            if (w != field_.tilesW || h != field_.tilesH) field_.resize(0, 0, w - field_.tilesW, h - field_.tilesH);
+            Image layers[3];
+            const Image *use[3] = {};
+            for (int d = 0; d < 3; d++) {
+                /* one picture is the whole background: the other depths are cleared */
+                if (!pics[d].isNull() || !set) layers[d] = fromQImage(pics[d], field_.width(), field_.height());
+                if (layers[d].w) use[d] = &layers[d];
+            }
+            std::string e;
+            if (!field_.importLayers(use, &e, &changed)) return *err = QString::fromStdString(e), false;
+            return true;
+        }))
+        return;
+    statusBar()->showMessage(QString("%1 tiles made from the pictures").arg(changed), 8000);
+}
+
+void MainWindow::newField() {
+    if (field_.stage.name.empty()) return;
+    int mode = free_field_mode(stages_);
+    if (!mode) {
+        QMessageBox::information(this, "New field", "Every mode a new field can take is used.");
+        return;
+    }
+    QDialog d(this);
+    d.setWindowTitle("New field");
+    auto *form = new QFormLayout(&d);
+    QString templ = QString::fromStdString(field_.stage.isNew() ? field_.stage.templ : field_.stage.name).toUpper();
+    form->addRow(richLabel(QString("A field of your own, mode %1 (0x%2). It runs the code of <b>%3</b>, the field open now: "
+                                   "its sprites, music and texts, and its events, which check the story as they do there.")
+                               .arg(mode).arg(mode, 0, 16).arg(templ)));
+    auto names = [&](const std::vector<std::string> &list, int current) {
+        auto *c = new QComboBox(&d);
+        c->setEditable(true);
+        c->setInsertPolicy(QComboBox::NoInsert);
+        for (int i = 0; i < (int)list.size(); i++)
+            if (!list[i].empty()) c->addItem(QString::fromStdString(list[i]), i);
+        c->completer()->setFilterMode(Qt::MatchContains);
+        c->completer()->setCompletionMode(QCompleter::PopupCompletion);
+        c->setCurrentIndex(std::max(0, c->findData(current)));
+        return c;
+    };
+    const Stage::Mode cur = field_.stage.modes.empty() ? Stage::Mode{} : field_.stage.modes[0];
+    QComboBox *area = names(text_.areas, cur.area), *place = names(text_.places, cur.place);
+    area->setToolTip("The area's name the banner shows on arrival: one of the game's, or a new one typed here");
+    place->setToolTip("The place's name the banner shows on arrival: one of the game's, or a new one typed here");
+    form->addRow("Area name", area);
+    form->addRow("Place name", place);
+    auto *copy = new QRadioButton("A copy of this field: its map, characters, objects and exits", &d);
+    auto *empty = new QRadioButton("An empty map, walkable all over:", &d);
+    copy->setChecked(true);
+    auto *w = new QSpinBox(&d), *h = new QSpinBox(&d);
+    w->setRange(1, MAX_TILES), h->setRange(1, MAX_TILES);
+    w->setValue(std::max(3, field_.tilesW)), h->setValue(std::max(2, field_.tilesH));
+    w->setSuffix(" tiles wide"), h->setSuffix(" tiles high");
+    auto *sizeRow = new QHBoxLayout;
+    sizeRow->addWidget(w);
+    sizeRow->addWidget(h);
+    form->addRow(copy);
+    form->addRow(empty);
+    form->addRow("", sizeRow);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &d);
+    form->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &d, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &d, &QDialog::reject);
+    auto update = [&] {
+        w->setEnabled(empty->isChecked()), h->setEnabled(empty->isChecked());
+        buttons->button(QDialogButtonBox::Ok)->setEnabled(copy->isChecked() || w->value() * h->value() <= MAX_TILES);
+    };
+    connect(empty, &QRadioButton::toggled, &d, update);
+    connect(w, &QSpinBox::valueChanged, &d, update);
+    connect(h, &QSpinBox::valueChanged, &d, update);
+    update();
+    if (d.exec() != QDialog::Accepted) return;
+    /* a name typed that the game hasn't: a new one, in every language's names file */
+    int nameAt[2];
+    QComboBox *boxes[2] = {area, place};
+    const int FILES[2] = {AREA_NAMES_FILE, PLACE_NAMES_FILE};
+    for (int k = 0; k < 2; k++) {
+        QString typed = boxes[k]->currentText().trimmed();
+        int at = boxes[k]->findText(typed);
+        nameAt[k] = at >= 0 ? boxes[k]->itemData(at).toInt() : -1;
+        if (nameAt[k] >= 0) continue;
+        QString e;
+        if ((nameAt[k] = addName(FILES[k], typed, &e)) < 0) {
+            QMessageBox::critical(this, "New field", "The name \"" + typed + "\" can't be written: " + e);
+            return;
+        }
+    }
+    NewField nf;
+    std::string err;
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    bool ok = make_new_field(files_, field_, mode, nameAt[0], nameAt[1],
+                             empty->isChecked() ? w->value() : 0, empty->isChecked() ? h->value() : 0, &nf, &err) &&
+              write_new_field(files_, nf, &err);
+    QApplication::restoreOverrideCursor();
+    if (!ok) {
+        QMessageBox::critical(this, "New field", QString::fromStdString(err));
+        return;
+    }
+    stages_.push_back(nf.stage);
+    rebuildModes();
+    stageTree_->clear();
+    buildStageTree();
+    openStage(QString::fromStdString(nf.stage.name));
+    statusBar()->showMessage("New field made. Lead an exit of another field to it to reach it in the game", 10000);
 }
 
 void MainWindow::closeEvent(QCloseEvent *e) {

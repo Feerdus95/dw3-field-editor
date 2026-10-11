@@ -257,6 +257,7 @@ static std::vector<std::pair<int, int>> codes(const Json &j) {
 bool Stage::load(const Json &j) {
     if (j.type != Json::Object) return false;
     name = j["name"].str;
+    templ = j["template"].str;
     for (auto &m : j["euModes"].items) modes.push_back({m[0].i(), m[1].i(), m[2].i(), m[3].i(), false});
     for (auto &m : j["modes"].items) {
         bool seen = false;
@@ -268,11 +269,16 @@ bool Stage::load(const Json &j) {
     for (int i = 0; i < 4; i++) color[i] = j["spriteColor"][i].i();
     for (int i = 0; i < 8; i++) mapFiles[i] = j["mapFiles"][i].i();
     loadSections(j);
-    for (auto &e : j["events"].items) events.push_back({e[0].i(), e[1].i(), e[2].i()});
     return true;
 }
 
 void Stage::loadSections(const Json &j) {
+    if (j["mapFile"].type == Json::Number) mapFile = j["mapFile"].i();
+    if (j["sheetEntry"].type == Json::Number) sheetEntry = j["sheetEntry"].i();
+    if (j["imageFile"].type == Json::Number) imageFile = j["imageFile"].i();
+    if (j["imageEntry"].type == Json::Number) imageEntry = j["imageEntry"].i();
+    if (j["mapFiles"].type == Json::Array)
+        for (int i = 0; i < 8; i++) mapFiles[i] = j["mapFiles"][i].i();
     if (j["start"].type == Json::Array) startX = j["start"][0].i(), startY = j["start"][1].i();
     if (j["startDir"].type == Json::Number) startDir = j["startDir"].i();
     if (j["objects"].type == Json::Array) objects.clear();
@@ -300,6 +306,18 @@ void Stage::loadSections(const Json &j) {
         std::array<int, 8> v;
         for (int i = 0; i < 8; i++) v[i] = m[i].i();
         images.push_back(v);
+    }
+    if (j["events"].type == Json::Array) events.clear();
+    for (auto &e : j["events"].items) {
+        Event t;
+        if (e.type == Json::Array) { /* an older dump: [id, scripted, text], without the script */
+            t.id = e[0].i(), t.text = e[2].i();
+        } else {
+            t.id = e["id"].i(), t.text = e["text"].i(), t.start = e["start"].i(), t.end = e["end"].i();
+            t.scripted = e["script"].type == Json::Array;
+            for (auto &w : e["script"].items) t.script.push_back(w.i());
+        }
+        events.push_back(t);
     }
     if (j["places"].type == Json::Array) places.clear();
     for (auto &p : j["places"].items) {
@@ -332,6 +350,9 @@ std::string section_json(const Stage &s, const std::string &section) {
     };
     if (section == "start") return "[" + std::to_string(s.startX) + "," + std::to_string(s.startY) + "]";
     if (section == "startDir") return std::to_string(s.startDir);
+    if (section == "mapFile") return std::to_string(s.mapFile);
+    if (section == "imageFile") return std::to_string(s.imageFile);
+    if (section == "imageEntry") return std::to_string(s.imageEntry);
     out = "[";
     if (section == "objects")
         for (size_t i = 0; i < s.objects.size(); i++) out += (i ? ",\n" : "\n") + ints(&s.objects[i].visible, 14);
@@ -354,6 +375,18 @@ std::string section_json(const Stage &s, const std::string &section) {
                        codes_json(a.talks[k].conditions) + ",\"actions\":" + codes_json(a.talks[k].actions) + "}";
             out += "]}";
         }
+    if (section == "events")
+        for (size_t i = 0; i < s.events.size(); i++) {
+            const Event &e = s.events[i];
+            out += (i ? ",\n" : "\n") + std::string("{\"id\":") + std::to_string(e.id) + ",\"text\":" + std::to_string(e.text) +
+                   ",\"start\":" + std::to_string(e.start) + ",\"end\":" + std::to_string(e.end) + ",\"script\":";
+            if (!e.scripted) {
+                out += "null}";
+                continue;
+            }
+            for (size_t k = 0; k < e.script.size(); k++) out += (k ? "," : "[") + std::to_string(e.script[k]);
+            out += e.script.empty() ? "[]}" : "]}";
+        }
     if (section == "places")
         for (size_t i = 0; i < s.places.size(); i++) {
             const Place &p = s.places[i];
@@ -372,7 +405,7 @@ std::string section_json(const Stage &s, const std::string &section) {
 }
 
 std::string stage_mod_json(const Stage &edited, const Stage &original) {
-    static const char *SECTIONS[] = {"objects", "slots", "images", "actors", "start", "startDir", "places"};
+    static const char *SECTIONS[] = {"objects", "slots", "images", "actors", "start", "startDir", "places", "mapFile", "imageFile", "imageEntry", "events"};
     std::string out;
     for (const char *sec : SECTIONS) {
         std::string e = section_json(edited, sec);
@@ -380,6 +413,63 @@ std::string stage_mod_json(const Stage &edited, const Stage &original) {
         out += (out.empty() ? "{" : ",\n") + std::string("\"") + sec + "\":" + e;
     }
     return out.empty() ? "" : out + "}\n";
+}
+
+int command_args(int op) {
+    int kind = op >> 8, sub = op & 0xFF;
+    switch (kind) {
+    case 1: return sub == 2 ? 4 : 3;
+    case 2: return 4;
+    case 3: return sub == 1 ? 0 : sub == 4 ? 4 : 1;
+    case 6: return sub == 1 ? 3 : 2;
+    default: return -1;
+    }
+}
+
+std::vector<Command> parse_script(const std::vector<int> &script) {
+    std::vector<Command> out;
+    for (size_t i = 0; i < script.size();) {
+        int n = command_args(script[i]);
+        if (n < 0 || i + 1 + n > script.size()) break;
+        out.push_back({script[i], std::vector<int>(script.begin() + i + 1, script.begin() + i + 1 + n)});
+        i += 1 + n;
+    }
+    return out;
+}
+
+std::vector<int> build_script(const std::vector<Command> &commands) {
+    std::vector<int> out;
+    for (auto &c : commands) {
+        out.push_back(c.op);
+        for (int k = 0; k < command_args(c.op); k++) out.push_back(k < (int)c.args.size() ? c.args[k] : 0);
+    }
+    out.push_back(0);
+    return out;
+}
+
+int own_images_fid(const Stage &s) {
+    if (s.isNew()) return 6000 + ((s.modes.empty() ? 0x200 : s.modes[0].mode) - 0x200);
+    return 5000 + atoi(s.name.c_str() + 5);
+}
+
+int own_tiles_fid(const Stage &s) {
+    if (s.isNew()) return 4000 + 2 * ((s.modes.empty() ? 0x200 : s.modes[0].mode) - 0x200);
+    return 3000 + atoi(s.name.c_str() + 5);
+}
+
+std::string new_field_json(const Stage &s) {
+    auto n = [](int v) { return std::to_string(v); };
+    const Stage::Mode m = s.modes.empty() ? Stage::Mode{0, 0, 0, 0, false} : s.modes[0];
+    std::string mode = "[[" + n(m.mode) + "," + n(m.file) + "," + n(m.area) + "," + n(m.place) + "]]";
+    std::string out = "{\"name\":\"" + s.name + "\",\"template\":\"" + s.templ + "\",\n\"modes\":" + mode + ",\"euModes\":" + mode +
+                      ",\n\"mapFile\":" + n(s.mapFile) + ",\"sheetEntry\":" + n(s.sheetEntry) + ",\"imageEntry\":" + n(s.imageEntry) +
+                      ",\"imageFile\":" + n(s.imageFile) + ",\"textFile\":" + n(s.textFile) + ",\"soundBank\":" + n(s.soundBank) +
+                      ",\"music\":" + n(s.music) + ",\n\"spriteColor\":[" + n(s.color[0]) + "," + n(s.color[1]) + "," +
+                      n(s.color[2]) + "," + n(s.color[3]) + "],\"mapFiles\":[";
+    for (int i = 0; i < 8; i++) out += (i ? "," : "") + n(s.mapFiles[i]);
+    out += "],\n\"start\":" + section_json(s, "start") + ",\"startDir\":" + section_json(s, "startDir");
+    for (const char *sec : {"objects", "slots", "images", "actors", "places", "events"}) out += ",\n\"" + std::string(sec) + "\":" + section_json(s, sec);
+    return out + "}\n";
 }
 
 Sprite draw_sheet_frame(const uint8_t *sheet, size_t size, int frame, Vram &vram, int tx, int ty, int ax, int ay,
@@ -483,45 +573,17 @@ bool Field::load(const Files &files, const Stage &st, const std::vector<int> *an
     int tileBytes = (int)rd32(&map[12]);
     if (stage.mapFile && (tilesW <= 0 || tilesH <= 0 || tilesW * tilesH > 1000 || tileBytes <= 0))
         return error = "the map's file has an unknown header", false;
-    bool tinted = stage.color[3] != 0;
+    this->tileBytes = stage.mapFile ? tileBytes : 2048;
     for (int d = 0; d < 3; d++) tiles[d].assign((size_t)tilesW * tilesH, Image());
-    for (int t = 0; t < tilesW * tilesH; t++) {
+    tileData.assign((size_t)tilesW * tilesH, {});
+    for (int t = 0; t < tilesW * tilesH && stage.mapFile; t++) {
         int size = (uint16_t)rd16(&map[16 + t * 2]);
         size_t off = (size_t)(t * (tileBytes / 2048) + 1) * 2048;
         if (!size || off + 8 > map.size()) continue;
-        std::vector<uint8_t> d = unrlen(&map[off], std::min((size_t)tileBytes, map.size() - off));
-        if (d.size() < 8) continue;
-        /* FIELDSTG_loadStreamSprites: the sprites of the three depths, then the 8-bit TIM */
-        const uint8_t *tim = d.data() + rd32(d.data());
-        if (rd32(d.data()) + 20 > d.size()) continue;
-        uint32_t flag = rd32(tim + 4);
-        const uint8_t *clut = tim + 8 + 12, *img = tim + 8;
-        if (flag & 8) img = tim + 8 + rd32(tim + 8);
-        int tw = rd16(img + 8) * 2, th = rd16(img + 10);
-        const uint8_t *pix = img + 12;
-        size_t p = 4;
-        for (int dep = 0; dep < 3; dep++) {
-            if (p + 4 > d.size()) break;
-            int n = (int)rd32(&d[p]);
-            p += 4;
-            /* depth 2's sprites always take the field's color, the others only when it is set */
-            int k = dep == 2 || tinted ? 1 : 0;
-            int r = k ? stage.color[0] : 128, g = k ? stage.color[1] : 128, b = k ? stage.color[2] : 128;
-            for (int s = 0; s < n && p + 12 <= d.size(); s++, p += 12) {
-                int x = rd16(&d[p]), y = rd16(&d[p + 2]), u = rd16(&d[p + 4]), v = rd16(&d[p + 6]);
-                int w = rd16(&d[p + 8]), h = rd16(&d[p + 10]);
-                Image &im = tiles[dep][t];
-                if (!im.w) im.resize(128, 128);
-                for (int yy = 0; yy < h; yy++)
-                    for (int xx = 0; xx < w; xx++) {
-                        int px = x + xx, py = y + yy, tu = u + xx, tv = v + yy;
-                        if (px < 0 || py < 0 || px >= 128 || py >= 128 || tu >= tw || tv >= th) continue;
-                        if ((size_t)(pix - d.data()) + (size_t)tv * tw + tu >= d.size()) continue;
-                        uint32_t c = rgba15((uint16_t)rd16(clut + pix[tv * tw + tu] * 2), r, g, b);
-                        if (c) im.px[py * 128 + px] = c;
-                    }
-            }
-        }
+        tileData[t].assign(map.begin() + off, map.begin() + std::min(off + size, map.size()));
+        Image layers[3];
+        decode_tile(tileData[t], stage.color, layers);
+        for (int d = 0; d < 3; d++) tiles[d][t] = std::move(layers[d]);
     }
 
     /* the logic maps: a file entry each, fid << 16 | entry */
@@ -533,29 +595,35 @@ bool Field::load(const Files &files, const Stage &st, const std::vector<int> *an
         if (const uint8_t *e = archive_entry(f, stage.mapFiles[i] & 0xFFFF, &n)) maps[i].load(e, n);
         if (!stage.mapFile) tilesW = std::max(tilesW, maps[i].w / 128), tilesH = std::max(tilesH, maps[i].h / 128);
     }
-    if (!stage.mapFile)
+    if (!stage.mapFile) {
         for (auto &d : tiles) d.assign((size_t)tilesW * tilesH, Image());
+        tileData.assign((size_t)tilesW * tilesH, {});
+    }
 
     /* the objects' textures: the field's sprites at (0x200, 0x100) and
        (0x240, 0x100), the stage's images at (0x140, 0x100) with their CLUTs
        at (0, 0x1F0) (FIELDSTG_loadFieldFiles) */
-    vram = Vram();
-    std::vector<uint8_t> sprites = files.read(FIELD_SPRITES_FILE);
+    /* no field has both: an archive of its own, or an entry of one */
+    imagesData.clear();
     size_t n;
-    if (const uint8_t *e = archive_entry(sprites, 2, &n)) vram.loadArchive(e, n, 0x200, 0x100, 0, 0);
-    if (const uint8_t *e = archive_entry(sprites, 3, &n)) vram.loadArchive(e, n, 0x240, 0x100, 0, 0);
-    if (stage.imageEntry) {
+    if (stage.imageFile) imagesData = files.read(stage.imageFile);
+    else if (stage.imageEntry) {
         std::vector<uint8_t> f = files.read(stage.imageEntry >> 16);
-        if (const uint8_t *e = archive_entry(f, stage.imageEntry & 0xFFFF, &n)) vram.loadArchive(e, n, 0x140, 0x100, 0, 0x1F0);
+        if (const uint8_t *e = archive_entry(f, stage.imageEntry & 0xFFFF, &n)) imagesData.assign(e, e + n);
     }
-    if (stage.imageFile) {
-        std::vector<uint8_t> f = files.read(stage.imageFile);
-        if (!f.empty()) vram.loadArchive(f.data(), f.size(), 0x140, 0x100, 0, 0x1F0);
-    }
-    spritesFile_ = sprites;
+    spritesFile_ = files.read(FIELD_SPRITES_FILE);
     sheetFile_ = stage.sheetEntry ? files.read(stage.sheetEntry >> 16) : std::vector<uint8_t>();
-    refreshSprites(files, animFiles);
+    reloadImages(files, animFiles);
     return true;
+}
+
+void Field::reloadImages(const Files &files, const std::vector<int> *animFiles) {
+    vram = Vram();
+    size_t n;
+    if (const uint8_t *e = archive_entry(spritesFile_, 2, &n)) vram.loadArchive(e, n, 0x200, 0x100, 0, 0);
+    if (const uint8_t *e = archive_entry(spritesFile_, 3, &n)) vram.loadArchive(e, n, 0x240, 0x100, 0, 0);
+    if (!imagesData.empty()) vram.loadArchive(imagesData.data(), imagesData.size(), 0x140, 0x100, 0, 0x1F0);
+    refreshSprites(files, animFiles);
 }
 
 void Field::refreshSprites(const Files &files, const std::vector<int> *animFiles) {

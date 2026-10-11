@@ -33,6 +33,10 @@ through the native port's data folder.
     dashed ring.
   - Characters at 0, 0 are placed by the field's events, and listed apart.
 - **Objects**: their sprite, depth and animation.
+- **Events**: each one's script, the commands in words (a character walks there, says
+  this, the camera goes there...), with where it takes characters marked on the map,
+  and what starts it.
+- **The texts** in English, French, Italian, German or Spanish (View > Text language).
 
 ## Requirements
 
@@ -42,9 +46,10 @@ through the native port's data folder.
 
       dw2003.exe --dump-stages data/stages
 
-  This writes one file per field to `data/stages`, plus `characters.json`.
-- A port that loads the editor's changes (`data/mods/stages`) and takes `--field`, for
-  Test in game.
+  This writes one file per field to `data/stages`, plus `characters.json`. Dump them
+  again after updating the port: the events' scripts come from there.
+- A port that loads the editor's changes (`data/mods/stages`), its new fields and events,
+  and takes `--field` and `--event`, for Test in game.
 
 ## Use
 
@@ -67,8 +72,8 @@ The window:
   while painting, a bar below with what to paint and the brush's size (see [Editing](#editing)).
 - **The map** (middle), with the layer buttons and the overlays' opacity above it, and
   the story point the characters show.
-- **Contents** (right): the field's characters, exits and triggers, and objects. A
-  click selects the item on the map and centers it.
+- **Contents** (right): the field's characters, exits and triggers, objects and events.
+  A click selects the item on the map and centers it.
 - **Properties** (right): what is selected, or the field itself.
 - **The status bar**: the position under the cursor, and what each layer holds there.
 - **About** (on the menu bar): the version, license and credits.
@@ -85,7 +90,8 @@ The window:
 While painting, the brush's size is in the bar above the map; **Shift** paints a
 rectangle and **Alt** picks the value under the cursor. A **right click** on the map
 adds a character, a version of a spot, an object or a slot, duplicates or deletes the
-selection, or moves the start there. **Delete** removes what is selected.
+selection, adds an object from a picture or an event, or moves the start there.
+**Delete** removes what is selected.
 
 **Properties** edits what is selected: a character's look, place, facing, when it
 appears, and each of its lines (when, which text, what it does after); an exit's type,
@@ -97,8 +103,77 @@ actions are written as `code=value` pairs with the code in hex (`1A1F=1`, the fl
 **Story point** (above the map) shows each spot's version as at that point of the story,
 and Test in game starts there.
 
-**Ctrl+Z / Ctrl+Y** undo and redo, **Ctrl+S** saves, **F5** saves and tests in the game.
+**Ctrl+Z / Ctrl+Y** undo and redo, **Ctrl+S** saves, **F5** saves and tests in the game;
+with an event selected, the game plays it once the field is up.
 **File > Revert to the game's** deletes the field's saved changes.
+
+### Bigger maps and new backgrounds
+
+- **Map > Resize** adds tiles of 128 pixels on any side, or takes them away. What stands
+  on the map (characters, objects, the start) moves with its content, and so do the
+  exits of every field that arrive here (they are saved with the field). New cells are
+  blocked, without triggers or battles: paint them. A map has at most 255 tiles.
+- **Map > Export background** writes the background's three depths as pictures:
+  `name-back.png` (the ground, behind everything), `name-middle.png` (behind the
+  characters, unless a depth trigger puts the player behind it) and `name-front.png`
+  (over the characters: roofs, treetops).
+- **Map > Import background** reads them back: pick any of the three, and the editor
+  reads the others next to it. Only the tiles that changed are made again, each with its
+  own 256 colors. A picture with another name is the whole background, on the middle
+  depth. A picture of another size can resize the map to fit it.
+
+A field whose background changed gets a file of its own: the game shares backgrounds
+between a place's story copies, and those stay as they are.
+
+### Texts
+
+A character's line shows its text; **Edit the text...** changes it, and **New text...**
+writes one of its own for the line. The dialog has the speaker's name and the text: a line
+break is a new line, an empty line a new page (the talk box shows three lines a page),
+`{player}` the player's name, and other `{..}` are codes the game's texts have, kept as
+they are. It says when a line is wider than the field's texts get, or a page longer than
+three lines. The letters are the font's: the European ones (é, ñ, ü, ß...) too.
+
+The texts are in the language View > Text language shows. A new text goes to every
+language as written; switch the language to translate it. The fields share their text
+files: a change to a text shows wherever it is said, and the dialog tells how many lines
+say it.
+
+### Events
+
+An event is a script the game runs: characters walk, pose and talk, the camera moves,
+the script waits for them, and it can end by leaving for another field. Events (in
+Contents) shows them; **Properties** edits the script, a command at a time: change one,
+move it up or down, remove it, or add one at the end. Places, walks and camera moves are
+marked on the map, numbered. A **Say** shows its text, which can be edited or written
+anew as a character's line can. Some events are code the game runs: those show what
+starts them, without a script.
+
+**Right click > Add an event** makes one, numbered from 9000, its first command a walk to
+where you clicked. Something has to start it: a slot of type **Event** (Properties picks
+the event; paint its trigger cells), or a character's line, with the action
+`9100=1` for event 9000, `9101=1` for 9001 and so on. With an event selected, **F5** plays
+it in the game.
+
+### Objects of your own
+
+**Right click > Add an object from a picture...** makes an object from a picture: one
+still frame, or the frames of an animation side by side, which the object plays in a
+loop. The picture gets 15 colors of its own and is anchored at its bottom middle, where
+you clicked. It goes into a page of the field's object images that the editor made, or a
+new one: a field has room for three pages, so the fields that use all three take no
+more.
+
+### New fields
+
+**File > New field** makes a field of your own from the one open: a copy of it, or an
+empty map of the size you choose, walkable all over. It takes a mode no field has
+(0x2F0 on) and the banner's area and place names: the game's, or new ones you type, which
+go to every language's names. It runs the
+code of the field it came from: its sprites, music and texts, and its events, which check
+the story as they do there. To reach it in the game, lead an exit of another field to it
+(it is in the exits' list); Test in game opens it directly. **File > Delete this new
+field** removes it and its files.
 
 ### What saving writes
 
@@ -110,8 +185,16 @@ Only what differs from the game, in the port's `data/` folder:
 - `mods/<file>.bin`: the field's file with the painted logic maps in it. The port
   reads it instead of the game's.
 
+- `mods/<3000 + the field's number>.bin`: its background, once changed.
+- `mods/<5000 + the field's number>.bin`: its objects' images, once a picture is added
+  (6000 + its number for a new field).
+- `mods/<text file>.bin`: the text files whose texts changed, in each language.
+- A new field: `mods/stages/new<mode>.json`, the whole of its tables, and its two files,
+  `mods/<4000 + 2 × its number>.bin` (the background) and the next one (its logic maps).
+
 A field as the game has it leaves no file. Some limits come from the game: a field has
-at most 31 slots, and a logic map at most 256 different 64-pixel cells.
+at most 31 slots, a logic map at most 256 different 64-pixel cells, and a map at most 255
+tiles.
 
 ### Command line
 
@@ -120,9 +203,18 @@ at most 31 slots, and a logic map at most 256 different 64-pixel cells.
     dw3fe --shot out.png wstag330      draws a field's map to a picture and exits
     dw3fe --check                      reads every field and prints what it found
     dw3fe --selftest                   checks what saving rests on, over every field:
-                                       each logic map encoded and read back the same
+                                       each logic map, background tile, text and event
+                                       script written and read back, the maps resized
+                                       back and forth, a sprite imported
     dw3fe wstag245 --select actor:19   opens a field with something selected
-                                       (actor:N, slot:N, object:N, start)
+                                       (actor:N, slot:N, object:N, event:N, start)
+    dw3fe --new-field wstag330 [--size 8x6] [--background picture.png]
+                                       makes a new field from one: a copy, or an
+                                       empty map of 8 x 6 tiles, its background a
+                                       picture of the map's size
+    dw3fe wstag330 --add-object picture.png 960,1000 [--frames 3]
+                                       adds an object from a picture at a point of a
+                                       field, and saves
 
 ## Building from source
 
@@ -165,21 +257,26 @@ and checks that it runs on its own and reads every field.
   the game's own C, compiled into the port. The port runs each field's setup and
   writes what it set (`--dump-stages`).
 - **The background** is a file of 128-pixel tiles, each RLEN-packed: up to five
-  sprites for each of three depths, then an 8-bit image.
+  sprites for each of three depths, then an 8-bit image of at most 256 x 128 pixels with
+  its 256 colors. Writing one, the editor drops what a nearer depth hides, cuts each depth
+  in strips and packs them in that image.
 - **The logic maps** are a tree of cells, 128 down to 8 pixels, ending in a byte per
   pixel: the floor's slope, a trigger's slot and facing, or a battle area.
 - **The objects** are frames of the field's sprite sheet, drawn from its images in an
   emulated VRAM, as the game's sprite drawer does.
 - **The characters** are the first standing frame of their animation file.
-- **The text** is the game's English text files, through the font's glyph table.
+- **The text** is the game's text files, a copy for each language, through the font's
+  glyphs and icons (the European letters are icons 59 on).
+- **The events** are the scripts FIELDSTG's event task reads, words of commands the port
+  dumps with the tables.
+- **The objects' pictures** are 4-bit pages of 256 x 256 pixels loaded at VRAM's
+  (0x140, 0x100), with the palettes inside the page, as the game's own.
 
 ## Not there yet
 
-- **Bigger fields and new ones**: growing the grid, importing a background from a
-  picture, making a new field.
-- **Event scripts**: their names show, not what they do.
-- **Text in other languages** than English, and writing new texts: a line picks one of
-  the field's texts.
+- **The story's events**: the game starts some events at a point of the story from a
+  list of its own; a field's new events start from a slot or a line.
+- **Characters of your own**: a character is one of the game's, with its sprite.
 
 ## License
 

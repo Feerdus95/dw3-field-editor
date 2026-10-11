@@ -6,8 +6,12 @@
    dw3fe --check                    reads every stage and prints what it found
    dw3fe --selftest                 checks what saving rests on over every stage
    dw3fe stage --select actor:N     opens a stage with something selected
-                                    (actor:N, slot:N, object:N, start)
+                                    (actor:N, slot:N, object:N, event:N, start)
    dw3fe --data DIR                 the port's data folder (files/, mods/, stages/)
+   dw3fe --new-field stage [--size WxH] [--background picture.png]
+                                    a new field from a stage: a copy, or an empty map
+   dw3fe stage --add-object picture.png X,Y [--frames N]
+                                    an object from a picture at a point, saved
 
    The stages' tables come from the port: dw2003 --dump-stages DATA/stages. */
 #include <QApplication>
@@ -22,6 +26,7 @@
 #include <algorithm>
 #include <cstring>
 #include <map>
+#include <set>
 #include <cstdio>
 #include "mainwindow.h"
 #ifdef _WIN32
@@ -39,10 +44,12 @@ static void attach_console() {
 #endif
 }
 
-/* The stages of DIR/stages: a .json file each */
+/* The stages of DIR/stages, a .json file each, and the new fields of DIR/mods/stages (new*.json) */
 static std::vector<Stage> load_stages(const QString &dir) {
     std::vector<Stage> out;
-    for (const QFileInfo &fi : QDir(dir + "/stages").entryInfoList({"*.json"}, QDir::Files)) {
+    QFileInfoList list = QDir(dir + "/stages").entryInfoList({"*.json"}, QDir::Files);
+    if (!list.isEmpty()) list += QDir(dir + "/mods/stages").entryInfoList({"new*.json"}, QDir::Files);
+    for (const QFileInfo &fi : list) {
         QFile f(fi.filePath());
         if (!f.open(QIODevice::ReadOnly)) continue;
         Json j;
@@ -80,6 +87,8 @@ static QImage compose(const Field &f) {
     }
     return img;
 }
+
+static uint32_t rd32le(const uint8_t *p) { return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24; }
 
 /* What saving rests on, over every stage: each logic map encoded and read
    back the same, inside its rebuilt file; a stage's mod empty when nothing
@@ -124,6 +133,10 @@ static int run_selftest(const Files &files, const std::vector<Stage> &stages) {
                 if (!same) printf("%s: file %d entry %d changed in the rebuild\n", s.name.c_str(), fid, k), bad++;
             }
         }
+        /* the events' scripts read as commands and written back the same */
+        for (const Event &e : s.events)
+            if (e.scripted && build_script(parse_script(e.script)) != e.script)
+                printf("%s: event %d's script doesn't come back\n", s.name.c_str(), e.id), bad++;
         /* the mod: nothing for an unchanged stage; a moved character carried back */
         if (!stage_mod_json(s, s).empty()) printf("%s: a mod with no change\n", s.name.c_str()), bad++;
         if (!s.actors.empty()) {
@@ -137,8 +150,105 @@ static int run_selftest(const Files &files, const std::vector<Stage> &stages) {
             if (!stage_mod_json(applied, edited).empty()) printf("%s: the mod doesn't carry the change\n", s.name.c_str()), bad++;
         }
     }
-    printf("%zu stages, %d logic maps (%ld bytes as the game has them, %ld encoded): %d problems\n", stages.size(), maps,
-           before, after, bad);
+    /* the background: every tile encoded and read back, the same when it has
+       few enough colors; the map file rebuilt as it was */
+    std::set<int> seen;
+    int tiles = 0, exact = 0, drawn = 0, sprites = 0;
+    for (const Stage &s : stages) {
+        if (!s.mapFile || s.isNew() || !seen.insert(s.mapFile).second) continue;
+        Field f;
+        if (!f.load(files, s)) continue;
+        for (int t = 0; t < f.tilesW * f.tilesH; t++) {
+            if (f.tileData[t].empty()) continue;
+            Image layers[3], back[3];
+            for (int d = 0; d < 3; d++) layers[d] = f.tiles[d][t];
+            std::string err;
+            std::vector<uint8_t> chunk = encode_tile(layers, s.color, &err);
+            tiles++;
+            if (!err.empty()) {
+                printf("%s: tile %d can't be encoded: %s\n", s.name.c_str(), t, err.c_str()), bad++;
+                continue;
+            }
+            decode_tile(chunk, s.color, back);
+            /* what shows, nearest depth first, the same */
+            bool same = true;
+            for (int i = 0; i < 128 * 128 && same; i++) {
+                uint32_t a = 0, b = 0;
+                for (int d : {1, 0, 2}) {
+                    if (!a && layers[d].w) a = layers[d].px[i];
+                    if (!b && back[d].w) b = back[d].px[i];
+                }
+                same = a == b;
+            }
+            exact += same;
+        }
+        /* tiles added on every side and taken away again: the map as it was */
+        Field g = f;
+        g.resize(1, 2, 1, 2);
+        g.resize(-1, -2, -1, -2);
+        bool back = g.tilesW == f.tilesW && g.tileData == f.tileData && stage_mod_json(g.stage, f.stage).empty();
+        for (int i = 0; i < 8; i++) back &= g.maps[i].px == f.maps[i].px;
+        if (!back) printf("%s: resizing back and forth changed the map\n", s.name.c_str()), bad++;
+        /* a sprite imported where there is room: the sheet's frames drawn as before, the new ones as the picture */
+        if (s.sheetEntry) {
+            Field h = f;
+            Image pic;
+            pic.resize(24, 32);
+            for (int y = 4; y < 32; y++)
+                for (int x = 2; x < 22; x++) pic.px[(size_t)y * 24 + x] = 0xFF000000u | (uint32_t)(x * 10) << 8 | (uint32_t)(y * 6) << 16 | 0x40;
+            std::string err;
+            int id = h.importSprite({pic, pic}, &err);
+            sprites += id >= 0;
+            if (id >= 0) {
+                size_t n0, n1;
+                const uint8_t *a = archive_entry(f.sheetFile_, s.sheetEntry & 0xFFFF, &n0), *b = archive_entry(h.sheetFile_, s.sheetEntry & 0xFFFF, &n1);
+                h.vram = Vram();
+                h.reloadImages(files, nullptr);
+                int neutral[3] = {128, 128, 128};
+                /* the frames the sheet has (the drawer reads past its ids for one it hasn't) */
+                for (uint32_t k = rd32le(a + 4); k < n0 && a[k] != 0xFF; k++) {
+                    int fr = a[k];
+                    Sprite x = draw_sheet_frame(a, n0, fr, f.vram, 0x140, 0x100, 0, 0x1F0, 0, neutral);
+                    Sprite y = draw_sheet_frame(b, n1, fr, h.vram, 0x140, 0x100, 0, 0x1F0, 0, neutral);
+                    if (x.img.px != y.img.px || x.ox != y.ox) printf("%s: frame %d changed with a sprite imported\n", s.name.c_str(), fr), bad++;
+                }
+                Sprite y = draw_sheet_frame(b, n1, id + 1, h.vram, 0x140, 0x100, 0, 0x1F0, 0, neutral);
+                if (y.img.w != 20 || y.img.h != 28 || y.ox != -10 || y.oy != -28) printf("%s: the imported sprite draws wrong\n", s.name.c_str()), bad++;
+            }
+        }
+        std::vector<uint8_t> data = f.mapFileData(), orig = files.read(s.mapFile);
+        int room;
+        memcpy(&room, &data[12], 4);
+        if (memcmp(data.data(), orig.data(), 12) != 0 || memcmp(&data[16], &orig[16], f.tilesW * f.tilesH * 2) != 0)
+            printf("%s: the map file's header changed\n", s.name.c_str()), bad++;
+        for (int t = 0; t < f.tilesW * f.tilesH; t++)
+            if (!f.tileData[t].empty() && memcmp(&data[2048 + (size_t)t * room], f.tileData[t].data(), f.tileData[t].size()) != 0)
+                printf("%s: tile %d moved in the map file\n", s.name.c_str(), t), bad++;
+        drawn++;
+    }
+    /* the texts: every string of the fields' text files and the banner's names, in every
+       language, as the editor writes it and back the same; each file rebuilt the same */
+    std::set<int> textFiles = {AREA_NAMES_FILE, PLACE_NAMES_FILE};
+    for (const Stage &s : stages) textFiles.insert(s.textFile);
+    int strings = 0, readable = 0;
+    for (int english : textFiles)
+        for (int lang = 0; lang < LANG_COUNT; lang++) {
+            std::vector<uint8_t> file = files.readOriginal(english + lang);
+            auto raw = read_raw_strings(file);
+            for (auto &str : raw) {
+                GameString g = bytes_to_text(str);
+                strings++;
+                readable += g.text.compare(0, 1, "{") != 0 || str.empty();
+                if (text_to_bytes(g) != str) printf("file %d: a string doesn't come back\n", english + lang), bad++;
+            }
+            std::vector<uint8_t> again = build_text_file(raw);
+            if (again.size() > file.size() || memcmp(again.data(), file.data(), again.size()) != 0)
+                printf("file %d: rebuilt differently\n", english + lang), bad++;
+        }
+    printf("%zu stages, %d logic maps (%ld bytes as the game has them, %ld encoded), %d backgrounds' %d tiles (%d drawn the "
+           "same once encoded; a sprite imported in %d), %zu text files' %d strings in %d languages (%d readable as "
+           "text): %d problems\n",
+           stages.size(), maps, before, after, drawn, tiles, exact, sprites, textFiles.size(), strings, LANG_COUNT, readable, bad);
     return bad != 0;
 }
 
@@ -148,18 +258,25 @@ int main(int argc, char **argv) {
     app.setOrganizationName("dw3fe");
     app.setStyle(QStyleFactory::create("Fusion"));
 
-    QString data, shot, open, selectWhat;
+    QString data, shot, open, selectWhat, newField, size, background, addObject, addAt;
+    int frames = 1;
     bool check = false, selftest = false;
     QStringList args = app.arguments();
     for (int i = 1; i < args.size(); i++) {
         if (args[i] == "--data" && i + 1 < args.size()) data = args[++i];
         else if (args[i] == "--shot" && i + 1 < args.size()) shot = args[++i];
+        else if (args[i] == "--new-field" && i + 1 < args.size()) newField = args[++i];
+        else if (args[i] == "--size" && i + 1 < args.size()) size = args[++i];
+        else if (args[i] == "--background" && i + 1 < args.size()) background = args[++i];
+        else if (args[i] == "--add-object" && i + 2 < args.size()) addObject = args[++i], addAt = args[++i];
+        else if (args[i] == "--frames" && i + 1 < args.size()) frames = args[++i].toInt();
         else if (args[i] == "--check") check = true;
         else if (args[i] == "--selftest") selftest = true;
         else if (args[i] == "--select" && i + 1 < args.size()) selectWhat = args[++i];
         else open = args[i];
     }
-    if (check || selftest || !shot.isEmpty()) attach_console();
+    bool console = check || selftest || !shot.isEmpty() || !newField.isEmpty() || !addObject.isEmpty();
+    if (console) attach_console();
 
     /* the data folder: --data, the last one used, or data/ next to the exe */
     QSettings settings;
@@ -172,7 +289,7 @@ int main(int argc, char **argv) {
             data = QDir(d).absolutePath();
             break;
         }
-    if (stages.empty() && !check && !selftest && shot.isEmpty()) {
+    if (stages.empty() && !console) {
         QMessageBox::information(nullptr, "DW3 Field Editor",
                                  "Pick the native port's data folder: the one with files/ and stages/.\n\n"
                                  "stages/ is made by the port: dw2003 --dump-stages data/stages");
@@ -181,14 +298,14 @@ int main(int argc, char **argv) {
     }
     if (stages.empty()) {
         fprintf(stderr, "no stages: pass --data DIR, the port's data folder with stages/ (dw2003 --dump-stages DIR/stages)\n");
-        if (!check && shot.isEmpty())
+        if (!console)
             QMessageBox::critical(nullptr, "DW3 Field Editor", "No stages there. Make them with: dw2003 --dump-stages data/stages");
         return 1;
     }
     settings.setValue("data", data);
     Files files{data.toStdString()};
     GameText text;
-    text.load(files);
+    text.load(files, std::clamp(settings.value("language", 0).toInt(), 0, LANG_COUNT - 1));
     /* each character's animation file, for the characters' sprites */
     std::vector<int> animFiles;
     QFile cf(data + "/stages/characters.json");
@@ -197,6 +314,41 @@ int main(int argc, char **argv) {
         for (auto &v : cj["animFiles"].items) animFiles.push_back(v.i());
 
     if (selftest) return run_selftest(files, stages);
+    if (!newField.isEmpty()) {
+        /* a new field from a stage as saved: a copy, or an empty map (--size WxH), its background a picture */
+        const Stage *from = nullptr;
+        for (auto &s : stages)
+            if (s.name == newField.toStdString()) from = &s;
+        if (!from) return fprintf(stderr, "--new-field: no stage named %s\n", qPrintable(newField)), 1;
+        Stage st = *from;
+        QFile mf(QString::fromStdString(files.stageModPath(st.name)));
+        Json mj;
+        if (!st.isNew() && mf.open(QIODevice::ReadOnly) && Json::parse(mf.readAll().toStdString(), mj)) st.loadSections(mj);
+        Field f;
+        if (!f.load(files, st, &animFiles)) return fprintf(stderr, "%s\n", f.error.c_str()), 1;
+        int w = 0, h = 0, mode = free_field_mode(stages);
+        if (!size.isEmpty() && (sscanf(qPrintable(size), "%dx%d", &w, &h) != 2 || w < 1 || h < 1 || w * h > MAX_TILES))
+            return fprintf(stderr, "--size: WxH tiles, at most %d of them\n", MAX_TILES), 1;
+        NewField nf;
+        std::string err;
+        if (!mode) return fprintf(stderr, "no mode is left for a new field\n"), 1;
+        if (!make_new_field(files, f, mode, st.modes[0].area, st.modes[0].place, w, h, &nf, &err) || !write_new_field(files, nf, &err))
+            return fprintf(stderr, "%s\n", err.c_str()), 1;
+        if (!background.isEmpty()) {
+            Field n;
+            QImage pic(background);
+            if (pic.isNull() || !n.load(files, nf.stage)) return fprintf(stderr, "can't read %s\n", qPrintable(background)), 1;
+            Image mid = fromQImage(pic, n.width(), n.height()), clear;
+            clear.resize(n.width(), n.height());
+            const Image *layers[3] = {&mid, &clear, &clear};
+            int changed = 0;
+            if (!n.importLayers(layers, &err, &changed) || !files.write(nf.stage.mapFile, n.mapFileData()))
+                return fprintf(stderr, "the background: %s\n", err.c_str()), 1;
+            printf("%d tiles from %s\n", changed, qPrintable(background));
+        }
+        printf("%s: mode %d (0x%X), on %s's code\n", nf.stage.name.c_str(), mode, mode, nf.stage.templ.c_str());
+        return 0;
+    }
     if (check) {
         int bad = 0;
         for (auto &s : stages) {
@@ -220,6 +372,16 @@ int main(int argc, char **argv) {
     }
 
     MainWindow w(files, std::move(stages), text, animFiles);
+    if (!addObject.isEmpty()) {
+        /* a picture as an object of a stage, saved: dw3fe stage --add-object picture.png X,Y [--frames N] */
+        QStringList xy = addAt.split(',');
+        QString err;
+        w.openStage(open);
+        if (xy.size() != 2 || !w.addObjectFromFile(addObject, frames, QPointF(xy[0].toInt(), xy[1].toInt()), &err) || !w.save())
+            return fprintf(stderr, "--add-object: %s\n", qPrintable(err.isEmpty() ? "X,Y and a stage to add it to" : err)), 1;
+        printf("%s: an object from %s at %s\n", qPrintable(open), qPrintable(addObject), qPrintable(addAt));
+        return 0;
+    }
     w.showMaximized();
     w.openStage(open.isEmpty() ? settings.value("stage", "wstag330").toString() : open);
     if (!selectWhat.isEmpty()) QTimer::singleShot(100, &w, [&] { w.selectByName(selectWhat); });

@@ -73,6 +73,8 @@ void MainWindow::linkClicked(const QString &link) {
     int n = p[1].toInt();
     if (p[0] == "mode" && modeStage_.contains(n)) openStage(QString::fromStdString(stages_[modeStage_[n]].name));
     else if (p[0] == "actor") select(KIND_ACTOR, n, true);
+    else if (p[0] == "slot") select(KIND_SLOT, n, true);
+    else if (p[0] == "event") select(KIND_EVENT, n, true);
     else if (p[0] == "paint") {
         setTool(TOOL_TRIGGERS);
         valueBox_->setCurrentIndex(std::max(0, valueBox_->findData(n)));
@@ -91,6 +93,7 @@ void MainWindow::showProperties() {
     else if (selKind_ == KIND_OBJECT && selIndex_ >= 0 && selIndex_ < (int)s.objects.size()) objectForm(f, selIndex_);
     else if (selKind_ == KIND_START) startForm(f);
     else if (selKind_ == KIND_BATTLES) battlesForm(f);
+    else if (selKind_ == KIND_EVENT && selIndex_ >= 0 && selIndex_ < (int)s.events.size()) eventForm(f, selIndex_);
     else stageForm(f);
     /* the old form may be the sender of the signal that brought us here */
     if (QWidget *old = props_->takeWidget()) old->deleteLater();
@@ -177,6 +180,19 @@ void MainWindow::actorForm(QFormLayout *f, int index) {
         });
         bf->addRow("Says", textBox);
         bf->addRow("", richLabel("<i>" + esc(talkText(t.entry)) + "</i>"));
+        auto *textButtons = new QHBoxLayout;
+        auto *editText = new QToolButton, *newText = new QToolButton;
+        editText->setText("Edit the text...");
+        editText->setToolTip(QString("Change this text, in %1").arg(LANGUAGE_NAMES[text_.lang]));
+        editText->setEnabled(t.entry >= 0 && t.entry < (int)talks_.size());
+        newText->setText("New text...");
+        newText->setToolTip("Write a text of its own for this line");
+        connect(editText, &QToolButton::clicked, this, [=] { editTalkText(field_.stage.actors[index].talks[k].entry); });
+        connect(newText, &QToolButton::clicked, this, [=] { newTalkText(index, k); });
+        textButtons->addWidget(editText);
+        textButtons->addWidget(newText);
+        textButtons->addStretch();
+        bf->addRow("", textButtons);
         auto *then = new QLineEdit(codesText(t.actions));
         then->setPlaceholderText("nothing");
         then->setToolTip("code=value pairs it applies when the text ends: 1A1F=1 sets flag 1A:1F...");
@@ -206,6 +222,203 @@ void MainWindow::actorForm(QFormLayout *f, int index) {
         edit([](Actor &x) { x.talks.insert(x.talks.begin(), Talk{x.talks.empty() ? 0 : x.talks[0].entry, {}, {}}); }, "Add a line");
     });
     add->setToolTip("A first line; give it conditions, so the others still come after it");
+    f->addRow(add);
+}
+
+/* The commands an event script has (FIELDSTG_runEvent), as the form shows them */
+struct CommandInfo {
+    int op;
+    const char *name, *args[4], *tip;
+};
+static const CommandInfo COMMANDS[] = {
+    {0x100, "Place", {"character", "x", "y"}, "puts a character at a point of the map"},
+    {0x102, "Walk to", {"character", "x", "y", "facing"}, "walks a character to a point, facing a way there"},
+    {0x101, "Pose", {"character", "animation", "facing"},
+     "plays a character's animation set (1 stand, 4 walk, 5 run, 8 search...) facing a way; a character of 0x320 on "
+     "is a script command, 0x32D the field's (its animation the command)"},
+    {0x200, "Say", {"box", "text", "character", "box type"},
+     "opens talk box 0 or 1 with a text of the event's: box types 0-3 by a character, 4 a message"},
+    {0x300, "Wait", {"frames"}, "waits some frames (50 or 60 a second)"},
+    {0x301, "Wait for the text", {}, "waits until talk box 0 is closed"},
+    {0x302, "Wait for the walk", {"character"}, "waits until a character gets where it walks"},
+    {0x303, "Wait for the animation", {"character"}, "waits until a character's animation ends"},
+    {0x304, "Leave for", {"mode", "x", "y", "facing"}, "leaves for a field (its mode), arriving at a point: the event ends"},
+    {0x600, "Camera follows", {"snap", "character"}, "the camera follows a character (snap 1: at once)"},
+    {0x601, "Camera to", {"snap", "x", "y"}, "the camera goes to a point (snap 1: at once)"},
+};
+static const CommandInfo *commandInfo(int op) {
+    for (const CommandInfo &c : COMMANDS)
+        if (c.op == op || ((op >> 8) == 2 && c.op == 0x200)) return &c;
+    return nullptr;
+}
+QString commandName(int op) {
+    const CommandInfo *c = commandInfo(op);
+    return c ? c->name : QString("command %1").arg(op, 0, 16);
+}
+
+/* The field's commands (FIELD_TASK_COMMANDS' arguments, field_map.h) */
+static const std::pair<int, const char *> FIELD_COMMANDS[] = {
+    {0x337, "halt partners"}, {0x338, "player icon 1, item got"}, {0x339, "player icon 2"}, {0x34A, "player icon 3, item got"},
+    {0x34D, "hide objects 0"}, {0x34E, "hide objects 1"}, {0x34F, "hide objects 2"}, {0x350, "hide objects 3"},
+    {0x351, "hide objects 4"}, {0x352, "hide objects 5"}, {0x353, "show objects 0"}, {0x354, "show objects 1"},
+    {0x355, "show objects 2"}, {0x356, "show objects 3"}, {0x357, "show objects 4"}, {0x358, "show objects 5"},
+    {0x365, "play INFO_SIG"}, {0x366, "play GAYALOOP"}, {0x367, "stop GAYALOOP"}, {0x368, "play WEAR_OFF"},
+    {0x369, "play DEMO_BGM"}, {0x36A, "play SE000002"}, {0x36B, "play BEAM_SHT"}, {0x36C, "play SWITCH02"},
+    {0x36D, "play MASK_SET"}, {0x36E, "play BM_ERASE"}, {0x36F, "play LD_ERASE"}, {0x370, "play PLAYER11"},
+    {0x371, "stop PLAYER11"}, {0x372, "shake the camera"}, {0x373, "stop the camera's shake"}, {0x374, "play TRAP_OFF"},
+    {0x375, "play SAVEDEMO"}, {0x376, "search the event spot"}, {0x377, "play SWITCH03"}, {0x378, "play SN_ENTRY"},
+    {0x379, "play SN_ERASE"}, {0x37A, "play TELEPORT"}, {0x37C, "play BULB_003"}, {0x37D, "play GONDRA_S"},
+    {0x37E, "play PIYOPIYO"}, {0x37F, "play COMCD103"}, {0x380, "play COMCD201"}, {0x381, "play COMCD111"},
+    {0x382, "play BEAM_HIT"}, {0x383, "play SWITCH01"}, {0x384, "play COMCD115"}, {0x385, "stop COMCD115"},
+    {0x386, "stop BEAM_HIT"},
+};
+
+QString MainWindow::characterName(int id) const {
+    if (id == CHARACTER_PLAYER) return "the player";
+    if (id >= CHARACTER_PARTNERS && id < CHARACTER_PARTNERS + 3) return QString("partner %1").arg(id - CHARACTER_PARTNERS + 1);
+    for (int i = 0; i < (int)field_.stage.actors.size(); i++)
+        if (field_.stage.actors[i].id == id) return actorName(i);
+    return QString("character 0x%1").arg(id, 0, 16);
+}
+
+void MainWindow::eventForm(QFormLayout *f, int index) {
+    const Event &e = field_.stage.events[index];
+    const Stage &st = field_.stage;
+    f->addRow(richLabel(QString("<h3>Event %1</h3>").arg(e.id)));
+    /* what starts it in this field */
+    QStringList by;
+    for (int i = 0; i < (int)st.slots.size(); i++)
+        if (st.slots[i].type == 8 && (int16_t)st.slots[i].arg == e.id) by << QString("<a href='slot:%1'>slot %1</a>").arg(i);
+    for (int i = 0; i < (int)st.actors.size(); i++)
+        for (const Talk &t : st.actors[i].talks)
+            for (auto &[code, value] : t.actions)
+                if (e.id >= EDITOR_EVENTS && code == (0x9100 | (e.id - EDITOR_EVENTS)))
+                    by << QString("<a href='actor:%1'>%2</a>'s line").arg(i).arg(actorName(i).toHtmlEscaped());
+    QString notes = by.isEmpty() ? "Nothing in this field starts it: a slot of type Event does, or the story (the game's own lists)."
+                                 : "Started by " + by.join(", ") + ".";
+    if (e.id >= EDITOR_EVENTS && e.id < EDITOR_EVENTS + 0x100)
+        notes += QString("<br>A character's line starts it with the action <b>%1=1</b>.")
+                     .arg(QString::number(0x9100 | (e.id - EDITOR_EVENTS), 16).toUpper());
+    if (e.start) notes += "<br>Code starts it: it has no script to edit.";
+    if (e.end) notes += "<br>Code of its own runs when it ends.";
+    f->addRow(richLabel(notes));
+    if (!e.scripted) return;
+
+    auto commands = parse_script(e.script);
+    auto edit = [this, index](std::vector<Command> c, const QString &what) {
+        Stage s = field_.stage;
+        s.events[index].script = build_script(c);
+        changeTables(s, what);
+    };
+    int key = eventKey(e.text, text_.lang);
+    auto texts = e.text ? textStrings(key) : std::vector<std::vector<uint8_t>>();
+    f->addRow(richLabel(QString("<h4>Script</h4><span style='color:#999'>%1 commands, run in order; the waits hold the "
+                                "script until they are done. Texts: file %2, entry %3.</span>")
+                            .arg(commands.size()).arg(e.text >> 16).arg(e.text & 0xFFFF)));
+    for (int k = 0; k < (int)commands.size(); k++) {
+        const Command &c = commands[k];
+        const CommandInfo *info = commandInfo(c.op);
+        auto *box = new QGroupBox(QString("%1. %2").arg(k + 1).arg(info ? info->name : "?"));
+        auto *bf = new QFormLayout(box);
+        auto *kind = new QComboBox;
+        for (const CommandInfo &ci : COMMANDS) kind->addItem(ci.name, ci.op);
+        kind->setCurrentIndex(std::max(0, kind->findData(info ? info->op : -1)));
+        if (info) kind->setToolTip(info->tip);
+        connect(kind, &QComboBox::currentIndexChanged, this, [=](int) {
+            auto cs = commands;
+            cs[k].op = kind->currentData().toInt();
+            cs[k].args.resize(command_args(cs[k].op), 0);
+            edit(cs, "Change a command");
+        });
+        bf->addRow("Command", kind);
+        for (int a = 0; a < (int)c.args.size(); a++) {
+            QString label = info && info->args[a] ? info->args[a] : QString("argument %1").arg(a + 1);
+            bool character = label == "character", hex = character || label == "mode";
+            auto *v = spin(-32768, 32767, c.args[a], hex ? 16 : 10);
+            connect(v, &QSpinBox::valueChanged, this, [=](int val) {
+                auto cs = commands;
+                cs[k].args[a] = val;
+                edit(cs, "Change a command");
+            });
+            bf->addRow(label.left(1).toUpper() + label.mid(1), v);
+            if (character && c.args[a] >= SCRIPT_COMMANDS) {
+                QString what = QString("script command %1").arg(c.args[a]);
+                if (c.args[a] == FIELD_COMMANDS_TASK) what = "the field's command";
+                bf->addRow("", richLabel("<span style='color:#999'>" + what + "</span>"));
+            } else if (character) bf->addRow("", richLabel("<span style='color:#999'>" + characterName(c.args[a]).toHtmlEscaped() + "</span>"));
+            if (label == "facing" && c.args[a] >= 0 && c.args[a] < 8) v->setSuffix(QString("  (%1)").arg(DIRS[c.args[a]]));
+            if (label == "mode") bf->addRow("", richLabel("<span style='color:#999'>" + modeName(c.args[a]).toHtmlEscaped() + "</span>"));
+        }
+        /* a pose of the field's commands: its name */
+        if (c.op == 0x101 && c.args.size() > 1 && c.args[0] == FIELD_COMMANDS_TASK)
+            for (auto &[id, name] : FIELD_COMMANDS)
+                if (id == c.args[1]) bf->addRow("", richLabel(QString("<span style='color:#999'>%1</span>").arg(name)));
+        /* a speech: its text, written here */
+        if ((c.op >> 8) == 2 && c.args.size() > 1) {
+            int t = c.args[1];
+            if (!e.text) bf->addRow("", richLabel("<span style='color:#f66'>The event has no texts.</span>"));
+            else {
+                std::string line = t >= 0 && t < (int)texts.size() ? decode_text(texts[t].data(), texts[t].size()) : "(no such text)";
+                bf->addRow("", richLabel("<i>" + esc(line) + "</i>"));
+                auto *tb = new QHBoxLayout;
+                auto *editText = new QToolButton, *newText = new QToolButton;
+                editText->setText("Edit the text...");
+                editText->setEnabled(t >= 0 && t < (int)texts.size());
+                newText->setText("New text...");
+                connect(editText, &QToolButton::clicked, this, [=] {
+                    editString(key, t, QString("Text %1 of event %2's texts, in %3.").arg(t).arg(e.id).arg(LANGUAGE_NAMES[text_.lang]));
+                });
+                int text = e.text;
+                connect(newText, &QToolButton::clicked, this, [=] {
+                    GameString g;
+                    if (t >= 0 && t < (int)texts.size()) g.speaker = bytes_to_text(texts[t]).speaker;
+                    appendString([this, text](int l) { return eventKey(text, l); }, g,
+                                 "A new text at the end of the event's texts, in every language as you write it here.",
+                                 [=](int entry) {
+                                     auto cs = commands;
+                                     cs[k].args[1] = entry;
+                                     edit(cs, "Change a command");
+                                 });
+                });
+                tb->addWidget(editText);
+                tb->addWidget(newText);
+                tb->addStretch();
+                bf->addRow("", tb);
+            }
+        }
+        auto *buttons = new QHBoxLayout;
+        auto *up = new QToolButton, *down = new QToolButton, *del = new QToolButton;
+        up->setText("Up"), down->setText("Down"), del->setText("Remove");
+        up->setEnabled(k > 0), down->setEnabled(k + 1 < (int)commands.size());
+        connect(up, &QToolButton::clicked, this, [=] {
+            auto cs = commands;
+            std::swap(cs[k], cs[k - 1]);
+            edit(cs, "Move a command up");
+        });
+        connect(down, &QToolButton::clicked, this, [=] {
+            auto cs = commands;
+            std::swap(cs[k], cs[k + 1]);
+            edit(cs, "Move a command down");
+        });
+        connect(del, &QToolButton::clicked, this, [=] {
+            auto cs = commands;
+            cs.erase(cs.begin() + k);
+            edit(cs, "Remove a command");
+        });
+        buttons->addWidget(up);
+        buttons->addWidget(down);
+        buttons->addStretch();
+        buttons->addWidget(del);
+        bf->addRow(buttons);
+        f->addRow(box);
+    }
+    auto *add = new QPushButton("Add a command");
+    add->setToolTip("A wait of 30 frames at the end; change it to what the event does next");
+    connect(add, &QPushButton::clicked, this, [=] {
+        auto cs = commands;
+        cs.push_back({0x300, {30}});
+        edit(cs, "Add a command");
+    });
     f->addRow(add);
 }
 
@@ -263,6 +476,20 @@ void MainWindow::slotForm(QFormLayout *f, int index) {
         pl->addWidget(place);
         pl->addWidget(placeArg);
         f->addRow("Place, argument", pl);
+    } else if (t.type == 8) {
+        /* an event of the field's */
+        auto *ev = new QComboBox;
+        for (const Event &e : field_.stage.events) ev->addItem(QString("Event %1").arg(e.id), e.id);
+        int at = ev->findData((int16_t)t.arg);
+        if (at < 0) ev->addItem(QString("Event %1 (the field has none)").arg((int16_t)t.arg), (int16_t)t.arg), at = ev->count() - 1;
+        ev->setCurrentIndex(at);
+        connect(ev, &QComboBox::currentIndexChanged, this, [=](int) {
+            int v = ev->currentData().toInt();
+            edit([v](Slot &s) { s.arg = v & 0xFFFF; }, "Change a slot's event");
+        });
+        f->addRow("Starts", ev);
+        for (int k = 0; k < (int)field_.stage.events.size(); k++)
+            if (field_.stage.events[k].id == (int16_t)t.arg) f->addRow("", richLabel(QString("<a href='event:%1'>Open it</a>").arg(k)));
     } else {
         auto *arg = spin(-32768, 32767, (int16_t)t.arg);
         arg->setToolTip("By type: a depth, a map, an event, or a height in 16 pixels (plus 1 for a climb)");
