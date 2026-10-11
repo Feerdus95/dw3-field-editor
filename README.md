@@ -90,8 +90,9 @@ The window:
 While painting, the brush's size is in the bar above the map; **Shift** paints a
 rectangle and **Alt** picks the value under the cursor. A **right click** on the map
 adds a character, a version of a spot, an object or a slot, duplicates or deletes the
-selection, adds an object from a picture or an event, or moves the start there.
-**Delete** removes what is selected.
+selection, adds an object from a picture or an event, or moves the start there; the
+**Add** menu adds the same in the middle of what the map shows. **Delete** removes what
+is selected.
 
 **Properties** edits what is selected: a character's look, place, facing, when it
 appears, and each of its lines (when, which text, what it does after); an exit's type,
@@ -104,7 +105,13 @@ actions are written as `code=value` pairs with the code in hex (`1A1F=1`, the fl
 and Test in game starts there.
 
 **Ctrl+Z / Ctrl+Y** undo and redo, **Ctrl+S** saves, **F5** saves and tests in the game;
-with an event selected, the game plays it once the field is up.
+with an event selected, the game plays it once the field is up, and with a character, an
+object or a slot selected, the player starts beside it.
+
+The status bar shows the **sprite memory** the field leaves: the share of the VRAM its
+characters and objects share that is taken, how many more characters would get an image
+slot of their own and how many new pages of object images would go. Busy fields (the
+towns) have little or none left.
 **File > Revert to the game's** deletes the field's saved changes.
 
 ### Bigger maps and new backgrounds
@@ -120,7 +127,8 @@ with an event selected, the game plays it once the field is up.
 - **Map > Import background** reads them back: pick any of the three, and the editor
   reads the others next to it. Only the tiles that changed are made again, each with its
   own 256 colors. A picture with another name is the whole background, on the middle
-  depth. A picture of another size can resize the map to fit it.
+  depth. A picture of another size can resize the map to fit it, or be fitted to the map
+  (scaled to cover it, its middle kept).
 
 A field whose background changed gets a file of its own: the game shares backgrounds
 between a place's story copies, and those stay as they are.
@@ -135,7 +143,8 @@ they are. It says when a line is wider than the field's texts get, or a page lon
 three lines. The letters are the font's: the European ones (é, ñ, ü, ß...) too.
 
 The texts are in the language View > Text language shows. A new text goes to every
-language as written; switch the language to translate it. The fields share their text
+language as written; switch the language to translate it (until then Properties says it
+is the same in every language). The fields share their text
 files: a change to a text shows wherever it is said, and the dialog tells how many lines
 say it.
 
@@ -145,7 +154,7 @@ An event is a script the game runs: characters walk, pose and talk, the camera m
 the script waits for them, and it can end by leaving for another field. Events (in
 Contents) shows them; **Properties** edits the script, a command at a time: change one,
 move it up or down, remove it, or add one at the end. Places, walks and camera moves are
-marked on the map, numbered. A **Say** shows its text, which can be edited or written
+marked on the map, numbered: drag a mark to move it. A **Say** shows its text, which can be edited or written
 anew as a character's line can. Some events are code the game runs: those show what
 starts them, without a script.
 
@@ -159,7 +168,7 @@ it in the game.
 
 **Right click > Add an object from a picture...** makes an object from a picture: one
 still frame, or the frames of an animation side by side, which the object plays in a
-loop. The picture gets 15 colors of its own and is anchored at its bottom middle, where
+loop; it shows the frames as they'll be cut, each one's anchor and the colors first. The picture gets 15 colors of its own and is anchored at its bottom middle, where
 you clicked. It goes into a page of the field's object images that the editor made, or a
 new one: a field has room for three pages, so the fields that use all three take no
 more.
@@ -207,8 +216,9 @@ empty map of the size you choose, walkable all over. It takes a mode no field ha
 (0x2F0 on) and the banner's area and place names: the game's, or new ones you type, which
 go to every language's names. It runs the
 code of the field it came from: its sprites, music and texts, and its events, which check
-the story as they do there. To reach it in the game, lead an exit of another field to it
-(it is in the exits' list); Test in game opens it directly. **File > Delete this new
+the story as they do there. To reach it in the game, **Reach it from** leads one of the
+open field's exits to it as it is made, or lead an exit of any field to it later (it is
+in the exits' list); Test in game opens it directly. **File > Delete this new
 field** removes it and its files.
 
 ### What saving writes

@@ -118,6 +118,8 @@ class MainWindow : public QMainWindow {
     void commitMoves();
     void deleteSelection();
     void contextMenu(QPointF p, QPoint global);
+    /* what can be added at p: the right click's, and the Add menu's (the map's middle) */
+    void addItems(QMenu *menu, QPointF p);
     void setTool(int tool);
     void refreshPaintOptions();
     int paintMap() const;

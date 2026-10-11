@@ -234,6 +234,15 @@ MainWindow::MainWindow(const Files &files, std::vector<Stage> stages, const Game
     editMenu->addAction(redoAct);
     editMenu->addSeparator();
     editMenu->addAction("&Delete", QKeySequence::Delete, this, &MainWindow::deleteSelection);
+    /* Add: what the right click adds, in the middle of what the map shows */
+    QMenu *addMenu = menuBar()->addMenu("&Add");
+    connect(addMenu, &QMenu::aboutToShow, this, [this, addMenu] {
+        addMenu->clear();
+        if (field_.stage.name.empty()) return;
+        QPointF c = view_->mapToScene(view_->viewport()->rect().center());
+        c.setX(std::clamp(c.x(), 0.0, (double)field_.width())), c.setY(std::clamp(c.y(), 0.0, (double)field_.height()));
+        addItems(addMenu, c);
+    });
     QMenu *charMenu = menuBar()->addMenu("&Characters");
     charMenu->addAction("&Export a template...", this, [this] {
         int cur = selKind_ == KIND_ACTOR && selIndex_ >= 0 && selIndex_ < (int)field_.stage.actors.size() ? field_.stage.actors[selIndex_].id : 0x1B;
@@ -1138,6 +1147,38 @@ void MainWindow::deleteSelection() {
     }
 }
 
+void MainWindow::addItems(QMenu *menu, QPointF p) {
+    menu->setToolTipsVisible(true);
+    int x = qRound(p.x()), y = qRound(p.y());
+    menu->addAction("Add a character...", [this, p] { addCharacterAt(p); })->setToolTip("Pick one by its look; it gets an image slot of its own");
+    if (!field_.stage.objects.empty())
+        menu->addAction("Add an object (a copy of the last)", [this, x, y] {
+            Stage s = field_.stage;
+            Object o = s.objects.back();
+            o.x = x, o.y = y, o.visible = 1;
+            s.objects.push_back(o);
+            changeTables(s, "Add an object");
+            select(KIND_OBJECT, (int)s.objects.size() - 1, false);
+        });
+    menu->addAction("Add an object from a picture...", [this, p] { addPictureObject(p); })
+        ->setToolTip("A sprite of your own: a picture, or the frames of an animation side by side");
+    menu->addAction("Add an event", [this, p] { addEvent(p); })->setToolTip("A script that a slot of type Event or a line starts");
+    menu->addAction("Add a slot (exit, climb, event...)", [this] {
+        Stage s = field_.stage;
+        if (s.slots.size() >= 31) {
+            QMessageBox::information(this, "Add a slot", "A field has at most 31 slots: a trigger cell names one in 5 bits.");
+            return;
+        }
+        Slot t{};
+        t.cond[0][0] = t.cond[1][0] = 0xFFFF;
+        t.type = 1;
+        t.arg = s.modes.empty() ? 0 : s.modes[0].mode;
+        s.slots.push_back(t);
+        changeTables(s, "Add a slot");
+        select(KIND_SLOT, (int)s.slots.size() - 1, false);
+    })->setToolTip("Then paint its cells with Paint triggers");
+}
+
 void MainWindow::contextMenu(QPointF p, QPoint global) {
     if (tool_ != TOOL_SELECT) return;
     /* what is under the click becomes the selection */
@@ -1182,33 +1223,7 @@ void MainWindow::contextMenu(QPointF p, QPoint global) {
         menu.addAction(QString("Delete object #%1").arg(sel), this, &MainWindow::deleteSelection);
         menu.addSeparator();
     }
-    menu.addAction("Add a character here...", [this, p] { addCharacterAt(p); })->setToolTip("Pick one by its look; it gets an image slot of its own");
-    if (!cur.objects.empty())
-        menu.addAction("Add an object here", [this, x, y] {
-            Stage s = field_.stage;
-            Object o = s.objects.back();
-            o.x = x, o.y = y, o.visible = 1;
-            s.objects.push_back(o);
-            changeTables(s, "Add an object");
-            select(KIND_OBJECT, (int)s.objects.size() - 1, false);
-        });
-    menu.addAction("Add a slot (exit, climb, event...)", [this] {
-        Stage s = field_.stage;
-        if (s.slots.size() >= 31) {
-            QMessageBox::information(this, "Add a slot", "A field has at most 31 slots: a trigger cell names one in 5 bits.");
-            return;
-        }
-        Slot t{};
-        t.cond[0][0] = t.cond[1][0] = 0xFFFF;
-        t.type = 1;
-        t.arg = s.modes.empty() ? 0 : s.modes[0].mode;
-        s.slots.push_back(t);
-        changeTables(s, "Add a slot");
-        select(KIND_SLOT, (int)s.slots.size() - 1, false);
-    });
-    menu.addAction("Add an object from a picture...", [this, p] { addPictureObject(p); })
-        ->setToolTip("A sprite of your own: a picture, or the frames of an animation side by side");
-    menu.addAction("Add an event", [this, p] { addEvent(p); })->setToolTip("A script that a slot of type Event or a line starts");
+    addItems(&menu, p);
     menu.addAction("Move the start here", [this, x, y] {
         Stage s = field_.stage;
         s.startX = x * 256, s.startY = y * 256;
