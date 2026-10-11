@@ -535,6 +535,11 @@ int Field::importSprite(const std::vector<Image> &frames, std::string *err) {
     for (int p = 0; p <= (int)pages.size() && page < 0; p++) {
         if (p == (int)pages.size()) {
             if (p >= 3) break;
+            /* the characters' images and palettes share these pages: only a free one */
+            bool free = true;
+            for (int y = 0; y < 256 && free && !vramTaken.empty(); y++)
+                for (int x = 0; x < 64 && free; x++) free = !vramTaken[(size_t)y * 320 + p * 64 + x];
+            if (!free) break;
             std::vector<uint16_t> blank(64 * 256, 0);
             memcpy(&blank[255 * 64 + 60], PAGE_TAG, 8);
             pages.push_back(tim_page(blank));
@@ -565,7 +570,7 @@ int Field::importSprite(const std::vector<Image> &frames, std::string *err) {
         if (fits) page = p, slot = s, at = places;
         else if (p == (int)pages.size() - 1 && !tagged(pages[p])) pages.pop_back();
     }
-    if (page < 0) return fail("the field's object images have no room left: it has three pages already");
+    if (page < 0) return fail("the field's VRAM has no page left for it: the objects' and the characters' images take them");
 
     /* the pixels and the palette into the page */
     std::vector<uint8_t> &t = pages[page];

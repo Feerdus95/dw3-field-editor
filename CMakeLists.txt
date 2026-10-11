@@ -8,7 +8,7 @@ set(CMAKE_AUTORCC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
 
-add_library(core STATIC src/core/field.cpp src/core/background.cpp src/core/text.cpp)
+add_library(core STATIC src/core/field.cpp src/core/background.cpp src/core/characters.cpp src/core/text.cpp)
 target_include_directories(core PUBLIC src/core)
 
 # the exe's icon: build.py's square, multi-size one from res/dw3fe.ico, or the original

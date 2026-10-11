@@ -196,6 +196,9 @@ struct Field {
        0x100) (FieldState.imageFile, or imageEntry's) */
     std::vector<uint8_t> imagesData;
     bool sheetEdited = false, imagesEdited = false;
+    /* what else takes VRAM's (320..639, 256..511), by halfword (characters.h's
+       field_vram): a new page of images may only go where it is free */
+    std::vector<bool> vramTaken;
 
     /* animFiles: each character's animation file entry (characters.json), for the actors' sprites */
     bool load(const Files &files, const Stage &stage, const std::vector<int> *animFiles = nullptr);

@@ -12,6 +12,12 @@
                                     a new field from a stage: a copy, or an empty map
    dw3fe stage --add-object picture.png X,Y [--frames N]
                                     an object from a picture at a point, saved
+   dw3fe --export-template HEX|standard out.png
+                                    a character's template, and its .json beside it
+   dw3fe --import-character sheet.png
+                                    a filled template as a character of your own
+   dw3fe stage --add-character HEX X,Y
+                                    a character with a slot of its own at a point, saved
 
    The stages' tables come from the port: dw2003 --dump-stages DATA/stages. */
 #include <QApplication>
@@ -29,6 +35,7 @@
 #include <set>
 #include <cstdio>
 #include "mainwindow.h"
+#include "characters.h"
 #ifdef _WIN32
 #include <io.h>
 #include <windows.h>
@@ -93,7 +100,7 @@ static uint32_t rd32le(const uint8_t *p) { return p[0] | p[1] << 8 | p[2] << 16 
 /* What saving rests on, over every stage: each logic map encoded and read
    back the same, inside its rebuilt file; a stage's mod empty when nothing
    changed, and carrying a change back when one did */
-static int run_selftest(const Files &files, const std::vector<Stage> &stages) {
+static int run_selftest(const Files &files, const std::vector<Stage> &stages, const std::vector<int> &animFiles) {
     int maps = 0, bad = 0;
     long before = 0, after = 0;
     for (const Stage &s : stages) {
@@ -226,6 +233,22 @@ static int run_selftest(const Files &files, const std::vector<Stage> &stages) {
                 printf("%s: tile %d moved in the map file\n", s.name.c_str(), t), bad++;
         drawn++;
     }
+    /* the characters: each one's template exported, imported as a file and
+       exported again the same (those within 15 colors) */
+    int exported = 0, back = 0;
+    for (int c = 0; c < (int)animFiles.size(); c++) {
+        CharTemplate t, t2;
+        Image sheet, sheet2;
+        std::string err;
+        if (!animFiles[c] || !export_character(files, animFiles[c], 32, &t, &sheet, &err)) continue;
+        exported++;
+        std::vector<std::string> problems;
+        std::vector<uint8_t> f = import_character(sheet, t, false, &problems);
+        if (f.empty()) continue; /* more than 15 colors, or a drawing the game leaves empty */
+        if (!export_character(f, 0, 32, &t2, &sheet2, &err) || t2.json() != t.json() || sheet2.px != sheet.px)
+            printf("character %d doesn't come back as a template\n", c), bad++;
+        else back++;
+    }
     /* the texts: every string of the fields' text files and the banner's names, in every
        language, as the editor writes it and back the same; each file rebuilt the same */
     std::set<int> textFiles = {AREA_NAMES_FILE, PLACE_NAMES_FILE};
@@ -249,6 +272,7 @@ static int run_selftest(const Files &files, const std::vector<Stage> &stages) {
            "same once encoded; a sprite imported in %d), %zu text files' %d strings in %d languages (%d readable as "
            "text): %d problems\n",
            stages.size(), maps, before, after, drawn, tiles, exact, sprites, textFiles.size(), strings, LANG_COUNT, readable, bad);
+    printf("%d characters exported as templates, %d of them imported and exported again the same\n", exported, back);
     return bad != 0;
 }
 
@@ -258,7 +282,7 @@ int main(int argc, char **argv) {
     app.setOrganizationName("dw3fe");
     app.setStyle(QStyleFactory::create("Fusion"));
 
-    QString data, shot, open, selectWhat, newField, size, background, addObject, addAt;
+    QString data, shot, open, selectWhat, newField, size, background, addObject, addAt, exportId, exportTo, importFrom, addChar;
     int frames = 1;
     bool check = false, selftest = false;
     QStringList args = app.arguments();
@@ -270,12 +294,16 @@ int main(int argc, char **argv) {
         else if (args[i] == "--background" && i + 1 < args.size()) background = args[++i];
         else if (args[i] == "--add-object" && i + 2 < args.size()) addObject = args[++i], addAt = args[++i];
         else if (args[i] == "--frames" && i + 1 < args.size()) frames = args[++i].toInt();
+        else if (args[i] == "--export-template" && i + 2 < args.size()) exportId = args[++i], exportTo = args[++i];
+        else if (args[i] == "--import-character" && i + 1 < args.size()) importFrom = args[++i];
+        else if (args[i] == "--add-character" && i + 2 < args.size()) addChar = args[++i], addAt = args[++i];
         else if (args[i] == "--check") check = true;
         else if (args[i] == "--selftest") selftest = true;
         else if (args[i] == "--select" && i + 1 < args.size()) selectWhat = args[++i];
         else open = args[i];
     }
-    bool console = check || selftest || !shot.isEmpty() || !newField.isEmpty() || !addObject.isEmpty();
+    bool console = check || selftest || !shot.isEmpty() || !newField.isEmpty() || !addObject.isEmpty() ||
+                   !exportId.isEmpty() || !importFrom.isEmpty() || !addChar.isEmpty();
     if (console) attach_console();
 
     /* the data folder: --data, the last one used, or data/ next to the exe */
@@ -312,8 +340,44 @@ int main(int argc, char **argv) {
     Json cj;
     if (cf.open(QIODevice::ReadOnly) && Json::parse(cf.readAll().toStdString(), cj))
         for (auto &v : cj["animFiles"].items) animFiles.push_back(v.i());
+    /* and the editor's own, past them (mods/characters.json) */
+    QFile mf2(data + "/mods/characters.json");
+    Json mj2;
+    if (mf2.open(QIODevice::ReadOnly) && Json::parse(mf2.readAll().toStdString(), mj2))
+        for (auto &c : mj2["characters"].items)
+            if (c[0].i() >= (int)animFiles.size() && c[0].i() < 4096) animFiles.resize(c[0].i() + 1, 0), animFiles[c[0].i()] = c[1].i();
 
-    if (selftest) return run_selftest(files, stages);
+    if (selftest) return run_selftest(files, stages, animFiles);
+    if (!exportId.isEmpty()) {
+        /* a character's template (hex number), or "standard" for the blank one */
+        CharTemplate t = standard_template();
+        Image sheet = blank_sheet(t);
+        std::string err;
+        int c = exportId.toInt(nullptr, 16);
+        if (exportId != "standard" && (c < 0 || c >= (int)animFiles.size() || !export_character(files, animFiles[c], 32, &t, &sheet, &err)))
+            return fprintf(stderr, "--export-template: %s\n", err.empty() ? "no such character" : err.c_str()), 1;
+        QFile jf(exportTo.left(exportTo.size() - 4) + ".json");
+        if (!toQImage(sheet).save(exportTo) || !jf.open(QIODevice::WriteOnly) || jf.write(QByteArray::fromStdString(t.json())) < 0)
+            return fprintf(stderr, "can't write %s\n", qPrintable(exportTo)), 1;
+        printf("%s: %d rows of %d cells of %d x %d\n", qPrintable(exportTo), t.rows(), t.cols(), t.cellW, t.cellH);
+        return 0;
+    }
+    if (!importFrom.isEmpty()) {
+        QFile jf(importFrom.left(importFrom.size() - 4) + ".json");
+        Json j;
+        CharTemplate t;
+        QImage pic(importFrom);
+        if (pic.isNull() || !jf.open(QIODevice::ReadOnly) || !Json::parse(jf.readAll().toStdString(), j) || !t.parse(j))
+            return fprintf(stderr, "--import-character: the sheet and its .json layout beside it\n"), 1;
+        std::vector<std::string> problems;
+        std::vector<uint8_t> f = import_character(fromQImage(pic, pic.width(), pic.height()), t, false, &problems);
+        for (auto &p : problems) fprintf(stderr, "%s\n", p.c_str());
+        std::string err;
+        int id = f.empty() ? -1 : register_character(files, f, t.width, (int)animFiles.size(), &err);
+        if (id < 0) return fprintf(stderr, "%s\n", err.c_str()), 1;
+        printf("character %d (0x%X)\n", id, id);
+        return 0;
+    }
     if (!newField.isEmpty()) {
         /* a new field from a stage as saved: a copy, or an empty map (--size WxH), its background a picture */
         const Stage *from = nullptr;
@@ -372,6 +436,16 @@ int main(int argc, char **argv) {
     }
 
     MainWindow w(files, std::move(stages), text, animFiles);
+    if (!addChar.isEmpty()) {
+        /* a character (hex number) with a slot of its own at a point of a stage, saved */
+        QStringList xy = addAt.split(',');
+        QString err;
+        w.openStage(open);
+        if (xy.size() != 2 || !w.addCharacter(addChar.toInt(nullptr, 16), QPointF(xy[0].toInt(), xy[1].toInt()), &err) || !w.save())
+            return fprintf(stderr, "--add-character: %s\n", qPrintable(err.isEmpty() ? "X,Y and a stage" : err)), 1;
+        printf("%s: character 0x%s at %s\n", qPrintable(open), qPrintable(addChar), qPrintable(addAt));
+        return 0;
+    }
     if (!addObject.isEmpty()) {
         /* a picture as an object of a stage, saved: dw3fe stage --add-object picture.png X,Y [--frames N] */
         QStringList xy = addAt.split(',');

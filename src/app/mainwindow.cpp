@@ -1,5 +1,7 @@
 #include "mainwindow.h"
 #include "mapview.h"
+#include "characters.h"
+#include <array>
 #include <QActionGroup>
 #include <QApplication>
 #include <QCloseEvent>
@@ -232,6 +234,13 @@ MainWindow::MainWindow(const Files &files, std::vector<Stage> stages, const Game
     editMenu->addAction(redoAct);
     editMenu->addSeparator();
     editMenu->addAction("&Delete", QKeySequence::Delete, this, &MainWindow::deleteSelection);
+    QMenu *charMenu = menuBar()->addMenu("&Characters");
+    charMenu->addAction("&Export a template...", this, [this] { exportTemplate(false); })
+        ->setToolTip("A game character's stand and walk as a sheet to draw over, with its layout");
+    charMenu->addAction("&Blank template...", this, [this] { exportTemplate(true); })
+        ->setToolTip("An empty sheet of the game's standard NPC: a front and a back, a stand and a walk");
+    charMenu->addAction("&Import a character...", this, &MainWindow::importCharacter)
+        ->setToolTip("A filled template as a character of your own, for the fields' characters to be");
     QMenu *mapMenu = menuBar()->addMenu("&Map");
     mapMenu->addAction("&Resize...", this, &MainWindow::resizeMap)
         ->setToolTip("Add or take away 128-pixel tiles on any side; what is on the map moves with it");
@@ -1807,6 +1816,7 @@ bool MainWindow::addObjectFromFile(const QString &path, int count, QPointF at, Q
         std::vector<Image> frames;
         for (int i = 0; i < count; i++) frames.push_back(fromQImage(pic.copy(i * fw, 0, fw, pic.height()), fw, pic.height()));
         std::string e;
+        field_.vramTaken = field_vram(files_, field_, animFiles_, false);
         int id = field_.importSprite(frames, &e);
         if (id < 0) {
             *err = "The picture can't be added: " + QString::fromStdString(e) + ".";
@@ -1820,6 +1830,108 @@ bool MainWindow::addObjectFromFile(const QString &path, int count, QPointF at, Q
         s.objects.push_back(o);
         return true;
     });
+}
+
+bool MainWindow::addCharacter(int id, QPointF at, QString *err) {
+    if (id < 0 || id >= (int)animFiles_.size() || !animFiles_[id]) return *err = "no character with sprites has that number", false;
+    int w, h;
+    character_size(files_, animFiles_[id], &w, &h);
+    Field probe = field_;
+    int slot = add_character_slot(probe, field_vram(files_, field_, animFiles_, true), w, h);
+    if (slot < 0) return *err = "the field's VRAM has no room left for its frames", false;
+    Stage s = field_.stage;
+    s.images = probe.stage.images;
+    s.actors.push_back(Actor{id, slot, qRound(at.x()), qRound(at.y()), 1, {}, {Talk{0, {}, {}}}});
+    changeTables(s, "Add a character");
+    return true;
+}
+
+void MainWindow::exportTemplate(bool blank) {
+    CharTemplate t = standard_template();
+    Image sheet;
+    QString base = "standard";
+    if (!blank) {
+        bool ok;
+        int cur = selKind_ == KIND_ACTOR && selIndex_ >= 0 && selIndex_ < (int)field_.stage.actors.size() ? field_.stage.actors[selIndex_].id : 0x1B;
+        QString id = QInputDialog::getText(this, "Export a template", "The character (its number in hex, as in Properties):",
+                                           QLineEdit::Normal, QString::number(cur, 16), &ok);
+        if (!ok) return;
+        int c = id.toInt(&ok, 16);
+        if (!ok || c < 0 || c >= (int)animFiles_.size() || !animFiles_[c]) {
+            QMessageBox::warning(this, "Export a template", "No character with sprites has that number.");
+            return;
+        }
+        std::string err;
+        if (!export_character(files_, animFiles_[c], 32, &t, &sheet, &err)) {
+            QMessageBox::warning(this, "Export a template", QString::fromStdString(err));
+            return;
+        }
+        base = QString("character-%1").arg(c, 0, 16);
+    } else sheet = blank_sheet(t);
+    QSettings settings;
+    QString path = QFileDialog::getSaveFileName(this, "Save the template", QDir(settings.value("pictures", QDir::homePath()).toString()).filePath(base + ".png"),
+                                                "PNG pictures (*.png)");
+    if (path.isEmpty()) return;
+    settings.setValue("pictures", QFileInfo(path).absolutePath());
+    QString json = path.left(path.size() - 4) + ".json";
+    QFile jf(json);
+    if (!toQImage(sheet).save(path) || !jf.open(QIODevice::WriteOnly) || jf.write(QByteArray::fromStdString(t.json())) < 0) {
+        QMessageBox::critical(this, "Export a template", "Can't write " + path);
+        return;
+    }
+    QStringList rows;
+    for (int r = 0; r < t.rows(); r++) rows << QString("%1. %2 (%3 drawings)").arg(r + 1).arg(QString::fromStdString(row_name(t, r))).arg(t.drawings(r / t.dirs()));
+    QMessageBox::information(this, "Export a template",
+                             QString("Written: %1 and its layout, %2.\n\nCells of %3 x %4, the feet at the cross (%5, %6). "
+                                     "A row for each animation and direction:\n%7\n\nDraw each cell with 15 colors at most, "
+                                     "without a shadow (the game draws it), and import the sheet with its .json beside it.")
+                                 .arg(QFileInfo(path).fileName(), QFileInfo(json).fileName())
+                                 .arg(t.cellW).arg(t.cellH).arg(t.anchorX).arg(t.anchorY).arg(rows.join("\n")));
+}
+
+void MainWindow::importCharacter() {
+    QSettings settings;
+    QString path = QFileDialog::getOpenFileName(this, "Import a character: the filled template", settings.value("pictures", QDir::homePath()).toString(),
+                                                "PNG pictures (*.png)");
+    if (path.isEmpty()) return;
+    QFile jf(path.left(path.size() - 4) + ".json");
+    Json j;
+    CharTemplate t;
+    if (!jf.open(QIODevice::ReadOnly) || !Json::parse(jf.readAll().toStdString(), j) || !t.parse(j)) {
+        QMessageBox::warning(this, "Import a character", "The template's layout isn't beside it: " + jf.fileName() +
+                                                             "\n\nExport a template (Characters menu) and draw over its sheet.");
+        return;
+    }
+    QImage pic(path);
+    Image sheet = fromQImage(pic, pic.width(), pic.height());
+    std::vector<std::string> problems;
+    std::vector<uint8_t> file = import_character(sheet, t, false, &problems);
+    if (file.empty()) {
+        QString list;
+        for (auto &p : problems) list += "\n- " + QString::fromStdString(p);
+        QMessageBox box(QMessageBox::Warning, "Import a character", "The sheet isn't to the template yet:" + list, QMessageBox::Cancel, this);
+        QPushButton *reuse = nullptr;
+        bool onlyEmpty = true;
+        for (auto &p : problems) onlyEmpty &= p.find("is empty") != std::string::npos;
+        if (onlyEmpty) reuse = box.addButton("Fill the empty ones with the drawing before (an exception)", QMessageBox::AcceptRole);
+        box.exec();
+        if (!reuse || box.clickedButton() != reuse) return;
+        problems.clear();
+        file = import_character(sheet, t, true, &problems);
+        if (file.empty()) return;
+    }
+    std::string err;
+    int id = register_character(files_, file, t.width, (int)animFiles_.size(), &err);
+    if (id < 0) {
+        QMessageBox::critical(this, "Import a character", QString::fromStdString(err));
+        return;
+    }
+    int fid = CHARACTER_FILES + id - GAME_CHARACTERS;
+    if ((int)animFiles_.size() <= id) animFiles_.resize(id + 1, 0);
+    animFiles_[id] = fid << 16;
+    QMessageBox::information(this, "Import a character",
+                             QString("Character %1 (0x%2) is yours: a character's Properties can show it (Character 0x%2).")
+                                 .arg(id).arg(id, 0, 16));
 }
 
 /* The places the selected event's script names: where characters are put

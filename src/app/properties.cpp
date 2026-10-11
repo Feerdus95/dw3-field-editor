@@ -1,6 +1,8 @@
 /* The Properties panel: what is selected, as a form whose every change is
    an undoable edit of the stage's tables */
 #include "mainwindow.h"
+#include "characters.h"
+#include <QMessageBox>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QFormLayout>
@@ -129,7 +131,29 @@ void MainWindow::actorForm(QFormLayout *f, int index) {
     auto *image = spin(0, std::max(0, (int)field_.stage.images.size() - 3), a.image);
     image->setToolTip("Where in VRAM its frames go: one of the field's character image slots");
     connect(image, &QSpinBox::valueChanged, this, [=](int v) { edit([v](Actor &x) { x.image = v; }, "Change the image slot"); });
-    f->addRow("Image slot", image);
+    auto *slotRow = new QHBoxLayout;
+    slotRow->addWidget(image);
+    auto *own = new QToolButton;
+    own->setText("A slot of its own");
+    own->setToolTip("Characters drawn at once each need their slot in VRAM: this makes one where the field leaves room, "
+                    "as big as this character's frames");
+    connect(own, &QToolButton::clicked, this, [=] {
+        const Actor &a = field_.stage.actors[index];
+        int w = 8, h = 40;
+        if (a.id >= 0 && a.id < (int)animFiles_.size() && animFiles_[a.id]) character_size(files_, animFiles_[a.id], &w, &h);
+        Field probe = field_;
+        int slot = add_character_slot(probe, field_vram(files_, field_, animFiles_, true), w, h);
+        if (slot < 0) {
+            QMessageBox::information(this, "Image slot", "The field's VRAM has no room left for this character's frames.");
+            return;
+        }
+        Stage s = field_.stage;
+        s.images = probe.stage.images;
+        s.actors[index].image = slot;
+        changeTables(s, "Give a character its own image slot");
+    });
+    slotRow->addWidget(own);
+    f->addRow("Image slot", slotRow);
     auto *x = spin(0, field_.width(), a.x), *y = spin(0, field_.height(), a.y);
     connect(x, &QSpinBox::valueChanged, this, [=](int v) { edit([v](Actor &c) { c.x = v; }, "Move a character"); });
     connect(y, &QSpinBox::valueChanged, this, [=](int v) { edit([v](Actor &c) { c.y = v; }, "Move a character"); });

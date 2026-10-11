@@ -48,6 +48,8 @@ class MainWindow : public QMainWindow {
        undo step; false (and why, shown or in err) when it can't be */
     bool addObjectFromFile(const QString &path, int count, QPointF at, QString *err = nullptr);
     bool save();
+    /* a character at `at` with an image slot of its own, an undo step; false with err */
+    bool addCharacter(int id, QPointF at, QString *err);
     /* selects "actor:N", "slot:N", "object:N" or "start" (the command line's --select) */
     void selectByName(const QString &what);
 
@@ -155,6 +157,9 @@ class MainWindow : public QMainWindow {
     QString characterName(int id) const;
     void addEvent(QPointF at);
     void addPictureObject(QPointF at);
+    /* the characters of your own (characters.h) */
+    void exportTemplate(bool blank);
+    void importCharacter();
     void showEventMarks();
     std::vector<QGraphicsItem *> eventMarks_;
 

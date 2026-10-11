@@ -164,6 +164,29 @@ you clicked. It goes into a page of the field's object images that the editor ma
 new one: a field has room for three pages, so the fields that use all three take no
 more.
 
+### Characters of your own
+
+A new character is drawn to the game's own measure, as its people are: a 4-bit sprite
+(15 colors and a transparent one), standing in 4 frames and walking in 6,
+seen from 5 directions (south, south-west, west, north-west, north; the game mirrors the
+others).
+
+- **Characters > Export a template...** writes one of the game's characters as a sheet
+  (`.png`) and its layout (`.json`, beside it): a row per animation and direction, a
+  cell per drawing, with the times and the order the game plays them in. **Blank
+  template...** writes the standard one, empty, with faint guides.
+- Draw over the sheet, keeping its cells, and **Characters > Import a character...**
+  reads it back. It says what isn't to the template yet (a cell's size, an empty cell,
+  more than 15 colors) instead of guessing; empty cells can be filled with the drawing
+  before, as an exception you choose.
+- The character gets a number of its own (406 on) and, in a character's Properties,
+  can be picked like the game's. The characters on a field at once each need an image
+  slot: **A slot of its own** (beside Image slot) makes one where the field's VRAM has
+  room, as big as the character's frames. Right click on the map shares the field's
+  first character's.
+
+The port finds the new characters in `mods/characters.json`.
+
 ### New fields
 
 **File > New field** makes a field of your own from the one open: a copy of it, or an
@@ -189,6 +212,8 @@ Only what differs from the game, in the port's `data/` folder:
 - `mods/<5000 + the field's number>.bin`: its objects' images, once a picture is added
   (6000 + its number for a new field).
 - `mods/<text file>.bin`: the text files whose texts changed, in each language.
+- `mods/<7000 + its number - 406>.bin`: a character of your own, its frames and
+  animations, and `mods/characters.json`, the list of them.
 - A new field: `mods/stages/new<mode>.json`, the whole of its tables, and its two files,
   `mods/<4000 + 2 × its number>.bin` (the background) and the next one (its logic maps).
 
@@ -215,6 +240,13 @@ tiles.
     dw3fe wstag330 --add-object picture.png 960,1000 [--frames 3]
                                        adds an object from a picture at a point of a
                                        field, and saves
+    dw3fe --export-template 1B sheet.png
+                                       a character's template (its number in hex, or
+                                       "standard" for the blank one) and its .json
+    dw3fe --import-character sheet.png a filled template as a character of your own
+    dw3fe wstag330 --add-character 196 960,990
+                                       puts a character (hex) at a point of a field
+                                       with an image slot of its own, and saves
 
 ## Building from source
 
@@ -276,7 +308,6 @@ and checks that it runs on its own and reads every field.
 
 - **The story's events**: the game starts some events at a point of the story from a
   list of its own; a field's new events start from a slot or a line.
-- **Characters of your own**: a character is one of the game's, with its sprite.
 
 ## License
 
