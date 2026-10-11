@@ -65,7 +65,7 @@ def main():
 
     files = {f"{ROOT}/{p.relative_to(BUILD).as_posix()}": p for p in BUILD.rglob("*")
              if p.is_file() and (p.name == "dw3fe.exe" or p.suffix == ".dll")}
-    for name in ("README.md", "LICENSE", "CREDITS.md"):
+    for name in ("README.md", "CHANGELOG.md", "LICENSE", "CREDITS.md"):
         files[f"{ROOT}/{name}"] = HERE / name
 
     # the licenses of the DLLs' packages: none may be missing
