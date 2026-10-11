@@ -1092,6 +1092,19 @@ void MainWindow::commitMoves() {
         int x = qRound(it->pos().x() * 256), y = qRound(it->pos().y() * 256);
         if (x != s.startX || y != s.startY) s.startX = x, s.startY = y, moved = true;
     }
+    /* the selected event's places: where characters are put and walk to, where the camera goes */
+    if (selKind_ == KIND_EVENT && selIndex_ >= 0 && selIndex_ < (int)s.events.size()) {
+        auto commands = parse_script(s.events[selIndex_].script);
+        bool changed = false;
+        for (QGraphicsItem *it : eventMarks_) {
+            if (!it->data(2).isValid()) continue;
+            int k = it->data(2).toInt(), ax = it->data(3).toInt();
+            int x = std::clamp(qRound(it->pos().x()), 0, field_.width()), y = std::clamp(qRound(it->pos().y()), 0, field_.height());
+            if (k < (int)commands.size() && (commands[k].args[ax] != x || commands[k].args[ax + 1] != y))
+                commands[k].args[ax] = x, commands[k].args[ax + 1] = y, changed = true;
+        }
+        if (changed) s.events[selIndex_].script = build_script(commands), moved = true;
+    }
     if (moved) changeTables(s, "Move");
 }
 
@@ -1838,13 +1851,58 @@ void MainWindow::addPictureObject(QPointF at) {
         QMessageBox::warning(this, "Add an object", "Can't read " + path);
         return;
     }
-    bool ok;
-    int count = QInputDialog::getInt(this, "Add an object",
-                                     QString("The picture is %1 x %2 pixels. How many frames side by side? (1: a still "
-                                             "picture; more: an animation the object plays)")
-                                         .arg(pic.width()).arg(pic.height()),
-                                     1, 1, 32, 1, &ok);
-    if (ok) addObjectFromFile(path, count, at);
+    /* the frames as they'll be cut, each one's anchor (its bottom middle, where you clicked) and the colors */
+    QDialog d(this);
+    d.setWindowTitle("Add an object");
+    auto *v = new QVBoxLayout(&d);
+    auto *view = new QLabel;
+    view->setAlignment(Qt::AlignCenter);
+    view->setMinimumSize(320, 160);
+    std::set<QRgb> colors;
+    QImage rgba = pic.convertToFormat(QImage::Format_ARGB32);
+    for (int y = 0; y < rgba.height(); y++)
+        for (int x = 0; x < rgba.width(); x++)
+            if (qAlpha(rgba.pixel(x, y)) >= 128) colors.insert(rgba.pixel(x, y) | 0xFF000000);
+    auto *row = new QHBoxLayout;
+    auto *count = new QSpinBox;
+    count->setRange(1, 32);
+    count->setSuffix(" frames side by side");
+    row->addWidget(count);
+    row->addStretch();
+    auto *info = new QLabel;
+    info->setWordWrap(true);
+    v->addWidget(view, 1);
+    v->addLayout(row);
+    v->addWidget(info);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    v->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &d, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &d, &QDialog::reject);
+    auto draw = [&] {
+        int n = count->value(), fw = pic.width() / n;
+        int scale = std::clamp(512 / std::max(1, pic.width()), 1, 4);
+        QPixmap pm(pic.width() * scale, pic.height() * scale);
+        pm.fill(QColor(60, 60, 60));
+        QPainter p(&pm);
+        p.drawImage(QRect(0, 0, pm.width(), pm.height()), pic);
+        p.setPen(QPen(QColor(255, 200, 60), 1, Qt::DashLine));
+        for (int i = 1; i < n; i++) p.drawLine(i * fw * scale, 0, i * fw * scale, pm.height());
+        p.setPen(QPen(QColor(255, 80, 80), 2));
+        for (int i = 0; i < n; i++) {
+            int ax = (i * fw + fw / 2) * scale, ay = pm.height() - 1;
+            p.drawLine(ax - 5, ay, ax + 5, ay), p.drawLine(ax, ay - 8, ax, ay);
+        }
+        p.end();
+        view->setPixmap(pm);
+        info->setText(QString("%1 frames of %2 × %3 pixels, each standing on its red mark (where you clicked)%4. %5 colors%6.")
+                          .arg(n).arg(fw).arg(pic.height())
+                          .arg(pic.width() % n ? QString(", %1 pixels on the right left out").arg(pic.width() % n) : QString())
+                          .arg(colors.size())
+                          .arg(colors.size() > 15 ? ": they'll be cut down to 15, so some will merge" : ""));
+    };
+    connect(count, &QSpinBox::valueChanged, &d, draw);
+    draw();
+    if (d.exec() == QDialog::Accepted) addObjectFromFile(path, count->value(), at);
 }
 
 bool MainWindow::addObjectFromFile(const QString &path, int count, QPointF at, QString *errOut) {
@@ -1895,7 +1953,11 @@ void MainWindow::showEventMarks() {
         dot->setPos(p);
         dot->setZValue(1500);
         dot->setFlag(QGraphicsItem::ItemIgnoresTransformations);
-        dot->setToolTip(QString("%1. %2 %3").arg(k + 1).arg(commandName(c.op)).arg(c.op == 0x601 ? "" : characterName(c.args[0])));
+        dot->setToolTip(QString("%1. %2 %3 (drag to move it)").arg(k + 1).arg(commandName(c.op)).arg(c.op == 0x601 ? "" : characterName(c.args[0])));
+        /* dragged, its command's place changes (commitMoves) */
+        dot->setFlag(QGraphicsItem::ItemIsMovable, tool_ == TOOL_SELECT);
+        dot->setCursor(Qt::SizeAllCursor);
+        dot->setData(2, k), dot->setData(3, ax);
         auto *num = new QGraphicsSimpleTextItem(QString::number(k + 1), dot);
         num->setFont(QFont("Segoe UI", 7, QFont::Bold));
         num->setPos(-num->boundingRect().width() / 2, -num->boundingRect().height() / 2);
@@ -2065,18 +2127,24 @@ void MainWindow::importBackground() {
     }
     int w = (size.width() + 127) / 128, h = (size.height() + 127) / 128;
     if (w != field_.tilesW || h != field_.tilesH) {
-        if (w * h > MAX_TILES) {
-            QMessageBox::warning(this, "Import the background",
-                                 QString("The picture is %1 × %2 pixels: %3 × %4 tiles, and the game takes at most %5.")
-                                     .arg(size.width()).arg(size.height()).arg(w).arg(h).arg(MAX_TILES));
-            return;
-        }
-        if (QMessageBox::question(this, "Import the background",
-                                  QString("The picture is %1 × %2 pixels, the map %3 × %4. Make the map %5 × %6 tiles, on the "
-                                          "right and the bottom?")
-                                      .arg(size.width()).arg(size.height()).arg(field_.width()).arg(field_.height()).arg(w).arg(h)) !=
-            QMessageBox::Yes)
-            return;
+        QMessageBox box(QMessageBox::Question, "Import the background",
+                        QString("The picture is %1 × %2 pixels, the map %3 × %4.")
+                            .arg(size.width()).arg(size.height()).arg(field_.width()).arg(field_.height()),
+                        QMessageBox::Cancel, this);
+        QPushButton *grow = box.addButton(QString("Make the map %1 × %2 tiles").arg(w).arg(h), QMessageBox::AcceptRole);
+        QPushButton *fit = box.addButton("Fit the picture to the map", QMessageBox::AcceptRole);
+        fit->setToolTip("Scaled to cover the map, its middle kept");
+        if (w * h > MAX_TILES) grow->setEnabled(false);
+        box.exec();
+        if (box.clickedButton() == fit) {
+            /* scaled to cover the map, the overflow cut evenly */
+            for (auto &p : pics) {
+                if (p.isNull()) continue;
+                QImage q = p.scaled(field_.width(), field_.height(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+                p = q.copy((q.width() - field_.width()) / 2, (q.height() - field_.height()) / 2, field_.width(), field_.height());
+            }
+            w = field_.tilesW, h = field_.tilesH;
+        } else if (box.clickedButton() != grow) return;
     }
     int changed = 0;
     if (!changeMap("Import the background", [&](QString *err) {
