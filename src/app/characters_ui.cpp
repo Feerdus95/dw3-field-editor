@@ -101,6 +101,13 @@ const std::vector<MainWindow::CharacterInfo> &MainWindow::characters() const {
             if (q.width() > 64 || q.height() > 80) q = q.scaled(64, 80, Qt::KeepAspectRatio);
             QPainter p(&pm);
             p.drawImage((64 - q.width()) / 2, 80 - q.height(), q);
+        } else {
+            /* no sprite: a spot the player talks to (a sign, a door...), the game draws nothing */
+            QPainter p(&pm);
+            p.setPen(QPen(QColor(150, 150, 150), 1, Qt::DashLine));
+            p.drawEllipse(12, 52, 40, 20);
+            p.drawText(QRect(0, 20, 64, 30), Qt::AlignCenter, "talk\nspot");
+            if (c.name.isEmpty()) c.name = "Talk spot";
         }
         c.thumb = pm;
         characters_.push_back(c);
@@ -236,7 +243,8 @@ QStringList MainWindow::slotSharers(int actor) const {
 }
 
 bool MainWindow::addCharacter(int id, QPointF at, QString *err, bool ask) {
-    if (id < 0 || id >= (int)animFiles_.size() || (!animFiles_[id] && id < GAME_CHARACTERS))
+    /* the game's sprite-less ones are spots to talk to; a character of yours without its file is gone */
+    if (id <= 0 || id >= (int)animFiles_.size() || (!animFiles_[id] && id >= GAME_CHARACTERS))
         return *err = "no character has that number", false;
     Stage s = field_.stage;
     s.actors.push_back(Actor{id, 0, qRound(at.x()), qRound(at.y()), 1, {}, {Talk{0, {}, {}}}});
