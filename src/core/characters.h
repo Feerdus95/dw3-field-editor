@@ -53,17 +53,28 @@ std::vector<uint8_t> import_character(const Image &sheet, const CharTemplate &t,
 /* What the field takes of VRAM's (320..639, 256..511), by halfword (320 x
    256): its objects' pages (with them or not), the field's sprites, and each
    character image slot's frames (as big as its characters' biggest) and
-   palette */
-std::vector<bool> field_vram(const Files &files, const Field &f, const std::vector<int> &animFiles, bool objectPages);
+   palette; a slot no character takes is free. imagesData: the objects' pages */
+std::vector<bool> field_vram(const Files &files, const Stage &st, const std::vector<uint8_t> &imagesData, const std::vector<int> &animFiles,
+                             bool objectPages);
 /* A character's biggest frame, in halfwords and lines */
 void character_size(const Files &files, int animFile, int *w, int *h);
 /* A character image slot of its own for frames of w halfwords by h lines,
    where the field leaves VRAM free: the number Actor.image takes, or -1 */
-int add_character_slot(Field &f, const std::vector<bool> &taken, int w, int h);
+int add_character_slot(Stage &st, const std::vector<bool> &taken, int w, int h);
 
 /* The editor's characters: ids from the game's count on, their files 7000 + id - CHARACTERS */
 static const int GAME_CHARACTERS = 406, CHARACTER_FILES = 7000;
+/* The editor's characters, as mods/characters.json lists them for the port */
+struct OwnCharacter {
+    int id, animFile, width;
+    std::string name;
+};
+std::vector<OwnCharacter> read_own_characters(const Files &files);
+bool write_own_characters(const Files &files, const std::vector<OwnCharacter> &list, std::string *err);
 /* An animation file as a new character: its file to mods/, its entry to
-   mods/characters.json (the port's list), the number past all the others
-   (first: the editor's list of characters' files). The id, or -1 with err */
-int register_character(const Files &files, const std::vector<uint8_t> &file, int width, int first, std::string *err);
+   the list, the number past all the others (first: the count of the
+   game's characters' files). The id, or -1 with err */
+int register_character(const Files &files, const std::vector<uint8_t> &file, int width, int first, const std::string &name,
+                       std::string *err);
+/* A character of the editor's out of the list, and its file */
+bool delete_character(const Files &files, int id, std::string *err);

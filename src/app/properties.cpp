@@ -13,6 +13,7 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSpinBox>
+#include <QStatusBar>
 #include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -124,36 +125,48 @@ void MainWindow::actorForm(QFormLayout *f, int index) {
         change(s.actors[index]);
         changeTables(s, what);
     };
-    auto *id = spin(0, (int)animFiles_.size() - 1, a.id, 16);
-    id->setToolTip("The character: its sprite and size (FIELDSTG_fileEntries)");
-    connect(id, &QSpinBox::valueChanged, this, [=](int v) { edit([v](Actor &x) { x.id = v; }, "Change the character"); });
-    f->addRow("Character", id);
+    /* the character, by its look; it takes an image slot that suits it */
+    auto *who = new QToolButton;
+    who->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    who->setIcon(QIcon(characterThumb(a.id)));
+    who->setIconSize(QSize(32, 40));
+    who->setText(characterLabel(a.id) + "  ▾");
+    who->setToolTip("The character: its sprite and size. Click to pick another by its look");
+    connect(who, &QToolButton::clicked, this, [=] {
+        int v = pickCharacter("The character", field_.stage.actors[index].id);
+        if (v < 0 || v == field_.stage.actors[index].id) return;
+        Stage s = field_.stage;
+        s.actors[index].id = v;
+        QString err;
+        if (!giveSlot(s, index, &err)) statusBar()->showMessage(err + " It keeps its slot.", 6000);
+        changeTables(s, "Change the character");
+    });
+    f->addRow("Character", who);
+    /* its image slot: shared only by characters of its look, as the game does */
     auto *image = spin(0, std::max(0, (int)field_.stage.images.size() - 3), a.image);
-    image->setToolTip("Where in VRAM its frames go: one of the field's character image slots");
+    image->setToolTip("Where in VRAM its frames go: one of the field's character image slots. The editor picks it; "
+                      "characters of the same look share one");
     connect(image, &QSpinBox::valueChanged, this, [=](int v) { edit([v](Actor &x) { x.image = v; }, "Change the image slot"); });
     auto *slotRow = new QHBoxLayout;
     slotRow->addWidget(image);
-    auto *own = new QToolButton;
-    own->setText("A slot of its own");
-    own->setToolTip("Characters drawn at once each need their slot in VRAM: this makes one where the field leaves room, "
-                    "as big as this character's frames");
-    connect(own, &QToolButton::clicked, this, [=] {
-        const Actor &a = field_.stage.actors[index];
-        int w = 8, h = 40;
-        if (a.id >= 0 && a.id < (int)animFiles_.size() && animFiles_[a.id]) character_size(files_, animFiles_[a.id], &w, &h);
-        Field probe = field_;
-        int slot = add_character_slot(probe, field_vram(files_, field_, animFiles_, true), w, h);
-        if (slot < 0) {
-            QMessageBox::information(this, "Image slot", "The field's VRAM has no room left for this character's frames.");
-            return;
-        }
-        Stage s = field_.stage;
-        s.images = probe.stage.images;
-        s.actors[index].image = slot;
-        changeTables(s, "Give a character its own image slot");
-    });
-    slotRow->addWidget(own);
+    QStringList others = slotSharers(index);
+    if (!others.isEmpty()) {
+        auto *own = new QToolButton;
+        own->setText("Give it its own");
+        own->setToolTip("Makes it an image slot where the field's sprite memory has room, as big as its frames");
+        connect(own, &QToolButton::clicked, this, [=] {
+            Stage s = field_.stage;
+            QString err;
+            if (!giveSlot(s, index, &err, true)) return (void)QMessageBox::information(this, "Image slot", err);
+            changeTables(s, "Give a character its own image slot");
+        });
+        slotRow->addWidget(own);
+    }
+    slotRow->addStretch();
     f->addRow("Image slot", slotRow);
+    if (!others.isEmpty())
+        f->addRow("", richLabel("<span style='color:#e66'>Shared with " + others.join(", ").toHtmlEscaped() +
+                                ": when both are on screen, one is drawn with the other's frames.</span>"));
     auto *x = spin(0, field_.width(), a.x), *y = spin(0, field_.height(), a.y);
     connect(x, &QSpinBox::valueChanged, this, [=](int v) { edit([v](Actor &c) { c.x = v; }, "Move a character"); });
     connect(y, &QSpinBox::valueChanged, this, [=](int v) { edit([v](Actor &c) { c.y = v; }, "Move a character"); });
@@ -204,6 +217,10 @@ void MainWindow::actorForm(QFormLayout *f, int index) {
         });
         bf->addRow("Says", textBox);
         bf->addRow("", richLabel("<i>" + esc(talkText(t.entry)) + "</i>"));
+        /* the game's empty texts only end its lists, after lines that cover every case */
+        if (k == 0 && talkText(t.entry).empty() && !invisibleActor(index))
+            bf->addRow("", richLabel("<span style='color:#e66'>An empty text: talking to it shows an empty box and the game "
+                                     "crashes. Give it a new text.</span>"));
         auto *textButtons = new QHBoxLayout;
         auto *editText = new QToolButton, *newText = new QToolButton;
         editText->setText("Edit the text...");

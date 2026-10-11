@@ -13,7 +13,7 @@
    dw3fe stage --add-object picture.png X,Y [--frames N]
                                     an object from a picture at a point, saved
    dw3fe --export-template HEX|standard out.png
-                                    a character's template, and its .json beside it
+                                    a character's template, its layout inside
    dw3fe --import-character sheet.png
                                     a filled template as a character of your own
    dw3fe stage --add-character HEX X,Y
@@ -341,11 +341,8 @@ int main(int argc, char **argv) {
     if (cf.open(QIODevice::ReadOnly) && Json::parse(cf.readAll().toStdString(), cj))
         for (auto &v : cj["animFiles"].items) animFiles.push_back(v.i());
     /* and the editor's own, past them (mods/characters.json) */
-    QFile mf2(data + "/mods/characters.json");
-    Json mj2;
-    if (mf2.open(QIODevice::ReadOnly) && Json::parse(mf2.readAll().toStdString(), mj2))
-        for (auto &c : mj2["characters"].items)
-            if (c[0].i() >= (int)animFiles.size() && c[0].i() < 4096) animFiles.resize(c[0].i() + 1, 0), animFiles[c[0].i()] = c[1].i();
+    for (auto &c : read_own_characters(files))
+        if (c.id >= (int)animFiles.size()) animFiles.resize(c.id + 1, 0), animFiles[c.id] = c.animFile;
 
     if (selftest) return run_selftest(files, stages, animFiles);
     if (!exportId.isEmpty()) {
@@ -356,24 +353,22 @@ int main(int argc, char **argv) {
         int c = exportId.toInt(nullptr, 16);
         if (exportId != "standard" && (c < 0 || c >= (int)animFiles.size() || !export_character(files, animFiles[c], 32, &t, &sheet, &err)))
             return fprintf(stderr, "--export-template: %s\n", err.empty() ? "no such character" : err.c_str()), 1;
-        QFile jf(exportTo.left(exportTo.size() - 4) + ".json");
-        if (!toQImage(sheet).save(exportTo) || !jf.open(QIODevice::WriteOnly) || jf.write(QByteArray::fromStdString(t.json())) < 0)
-            return fprintf(stderr, "can't write %s\n", qPrintable(exportTo)), 1;
+        QString why;
+        if (!writeTemplateSheet(exportTo, sheet, t, &why)) return fprintf(stderr, "%s\n", qPrintable(why)), 1;
         printf("%s: %d rows of %d cells of %d x %d\n", qPrintable(exportTo), t.rows(), t.cols(), t.cellW, t.cellH);
         return 0;
     }
     if (!importFrom.isEmpty()) {
-        QFile jf(importFrom.left(importFrom.size() - 4) + ".json");
-        Json j;
         CharTemplate t;
-        QImage pic(importFrom);
-        if (pic.isNull() || !jf.open(QIODevice::ReadOnly) || !Json::parse(jf.readAll().toStdString(), j) || !t.parse(j))
-            return fprintf(stderr, "--import-character: the sheet and its .json layout beside it\n"), 1;
+        Image sheet;
+        QString why;
+        if (readTemplateSheet(importFrom, &sheet, &t, &why) == TEMPLATE_NONE)
+            return fprintf(stderr, "--import-character: %s\n", qPrintable(why)), 1;
         std::vector<std::string> problems;
-        std::vector<uint8_t> f = import_character(fromQImage(pic, pic.width(), pic.height()), t, false, &problems);
+        std::vector<uint8_t> f = import_character(sheet, t, false, &problems);
         for (auto &p : problems) fprintf(stderr, "%s\n", p.c_str());
         std::string err;
-        int id = f.empty() ? -1 : register_character(files, f, t.width, (int)animFiles.size(), &err);
+        int id = f.empty() ? -1 : register_character(files, f, t.width, (int)animFiles.size(), QFileInfo(importFrom).completeBaseName().toStdString(), &err);
         if (id < 0) return fprintf(stderr, "%s\n", err.c_str()), 1;
         printf("character %d (0x%X)\n", id, id);
         return 0;
@@ -441,7 +436,7 @@ int main(int argc, char **argv) {
         QStringList xy = addAt.split(',');
         QString err;
         w.openStage(open);
-        if (xy.size() != 2 || !w.addCharacter(addChar.toInt(nullptr, 16), QPointF(xy[0].toInt(), xy[1].toInt()), &err) || !w.save())
+        if (xy.size() != 2 || !w.addCharacter(addChar.toInt(nullptr, 16), QPointF(xy[0].toInt(), xy[1].toInt()), &err, false) || !w.save())
             return fprintf(stderr, "--add-character: %s\n", qPrintable(err.isEmpty() ? "X,Y and a stage" : err)), 1;
         printf("%s: character 0x%s at %s\n", qPrintable(open), qPrintable(addChar), qPrintable(addAt));
         return 0;

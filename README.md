@@ -171,19 +171,32 @@ A new character is drawn to the game's own measure, as its people are: a 4-bit s
 seen from 5 directions (south, south-west, west, north-west, north; the game mirrors the
 others).
 
-- **Characters > Export a template...** writes one of the game's characters as a sheet
-  (`.png`) and its layout (`.json`, beside it): a row per animation and direction, a
-  cell per drawing, with the times and the order the game plays them in. **Blank
-  template...** writes the standard one, empty, with faint guides.
+Characters are picked by their look: a grid of each one's picture, named after who says
+its lines in the game (or the name you gave it), searchable by name, field or number, this
+field's first. The Character of a character's Properties, Add a character and Export a
+template all use it.
+
+- **Characters > Export a template...** writes a character as a sheet to draw over: a
+  `.png` with its layout inside (a row per animation and direction, a cell per drawing,
+  the times and the order the game plays them in). **Blank template...** writes the
+  standard one, empty, with faint guides. If the program you draw in drops the layout
+  when saving, the import asks which character the sheet came from.
 - Draw over the sheet, keeping its cells, and **Characters > Import a character...**
   reads it back. It says what isn't to the template yet (a cell's size, an empty cell,
   more than 15 colors) instead of guessing; empty cells can be filled with the drawing
-  before, as an exception you choose.
-- The character gets a number of its own (406 on) and, in a character's Properties,
-  can be picked like the game's. The characters on a field at once each need an image
-  slot: **A slot of its own** (beside Image slot) makes one where the field's VRAM has
-  room, as big as the character's frames. Right click on the map shares the field's
-  first character's.
+  before, as an exception you choose. It asks for a name and offers to place it on the
+  field open.
+- **Characters > Your characters...** lists them: place one on the field, import new
+  drawings for it (every field that has it shows them), export its template, rename or
+  delete it.
+- A character added to a field asks for its first line, its name as the speaker. (The
+  text files' first text is empty: the game only ends its lists of lines with it, and
+  saying it crashes the game.)
+- The characters on a field at once each need an image slot, where their frames go in
+  VRAM; the game gives each look its own, shared only by characters of that look. The
+  editor does the same: a character added or changed takes a slot of its look, or a new
+  one where the field's VRAM has room. A slot shared by two looks shows in red, with a
+  button to give it its own.
 
 The port finds the new characters in `mods/characters.json`.
 
@@ -242,11 +255,11 @@ tiles.
                                        field, and saves
     dw3fe --export-template 1B sheet.png
                                        a character's template (its number in hex, or
-                                       "standard" for the blank one) and its .json
+                                       "standard" for the blank one), its layout inside
     dw3fe --import-character sheet.png a filled template as a character of your own
     dw3fe wstag330 --add-character 196 960,990
                                        puts a character (hex) at a point of a field
-                                       with an image slot of its own, and saves
+                                       with an image slot and the line "...", and saves
 
 ## Building from source
 

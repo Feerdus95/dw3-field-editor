@@ -21,7 +21,7 @@ configure_file(res/dw3fe.rc.in "${CMAKE_BINARY_DIR}/gen/dw3fe.rc" @ONLY)
 
 add_executable(dw3fe WIN32
     src/app/main.cpp
-    src/app/mainwindow.cpp src/app/mainwindow.h src/app/properties.cpp
+    src/app/mainwindow.cpp src/app/mainwindow.h src/app/properties.cpp src/app/characters_ui.cpp
     src/app/mapview.cpp src/app/mapview.h
     res/dw3fe.qrc
     "${CMAKE_BINARY_DIR}/gen/dw3fe.rc")

@@ -215,7 +215,8 @@ void character_size(const Files &files, int animFile, int *w, int *h) {
     if (mw && mh) *w = mw, *h = mh;
 }
 
-std::vector<bool> field_vram(const Files &files, const Field &f, const std::vector<int> &animFiles, bool objectPages) {
+std::vector<bool> field_vram(const Files &files, const Stage &st, const std::vector<uint8_t> &imagesData, const std::vector<int> &animFiles,
+                             bool objectPages) {
     std::vector<bool> taken(320 * 256, false);
     auto mark = [&](int x, int y, int w, int h) {
         for (int yy = std::max(y, 256); yy < y + h && yy < 512; yy++)
@@ -223,7 +224,7 @@ std::vector<bool> field_vram(const Files &files, const Field &f, const std::vect
     };
     size_t n;
     /* the objects' pages, side by side from 0x140 */
-    for (int i = 0; objectPages && archive_entry(f.imagesData, i, &n); i++) mark(0x140 + i * 0x40, 256, 64, 256);
+    for (int i = 0; objectPages && archive_entry(imagesData, i, &n); i++) mark(0x140 + i * 0x40, 256, 64, 256);
     /* the field's sprites: FIELD_SPRITES_FILE's entries 2 and 3, each an archive of TIMs 0x40 apart */
     std::vector<uint8_t> sprites = files.read(0x160);
     for (int e = 2; e <= 3; e++) {
@@ -241,16 +242,21 @@ std::vector<bool> field_vram(const Files &files, const Field &f, const std::vect
         }
     }
     /* the character slots: as big as their characters' biggest frame, else a game NPC's; their palettes */
-    for (size_t k = 2; k < f.stage.images.size(); k++) {
-        const auto &m = f.stage.images[k];
+    for (size_t k = 2; k < st.images.size(); k++) {
+        const auto &m = st.images[k];
         if (!m[2] && !m[3]) continue;
         int w = 0, h = 0;
-        for (const Actor &a : f.stage.actors)
-            if (a.image == (int)k - 2 && a.id >= 0 && a.id < (int)animFiles.size() && animFiles[a.id]) {
+        bool used = false;
+        for (const Actor &a : st.actors) {
+            if (a.image != (int)k - 2) continue;
+            used = true;
+            if (a.id >= 0 && a.id < (int)animFiles.size() && animFiles[a.id]) {
                 int cw, ch;
                 character_size(files, animFiles[a.id], &cw, &ch);
                 w = std::max(w, cw), h = std::max(h, ch);
             }
+        }
+        if (!used) continue; /* no character takes it: its room is free */
         if (!w) w = 8, h = 40;
         mark(m[2], m[3], w, h);
         mark(m[6], m[7], 16, 1);
@@ -258,7 +264,7 @@ std::vector<bool> field_vram(const Files &files, const Field &f, const std::vect
     return taken;
 }
 
-int add_character_slot(Field &f, const std::vector<bool> &taken, int w, int h) {
+int add_character_slot(Stage &st, const std::vector<bool> &taken, int w, int h) {
     auto freeAt = [&](int x, int y, int ww, int hh) {
         for (int yy = y; yy < y + hh; yy++)
             for (int xx = x; xx < x + ww; xx++)
@@ -285,40 +291,68 @@ int add_character_slot(Field &f, const std::vector<bool> &taken, int w, int h) {
             if (ok) cx = x, cy = y;
         }
     if (cx < 0) return -1;
-    while (f.stage.images.size() < 2) f.stage.images.push_back({});
+    while (st.images.size() < 2) st.images.push_back({});
     int page = (ix - 320) / 64 * 64 + 320;
-    f.stage.images.push_back({page, 256, ix, iy, (ix - page) * 4, iy - 256, cx, cy});
-    return (int)f.stage.images.size() - 3; /* Actor.image is 2 short of its index (FIELDSTG_createActor) */
+    st.images.push_back({page, 256, ix, iy, (ix - page) * 4, iy - 256, cx, cy});
+    return (int)st.images.size() - 3; /* Actor.image is 2 short of its index (FIELDSTG_createActor) */
 }
 
-int register_character(const Files &files, const std::vector<uint8_t> &file, int width, int first, std::string *err) {
-    std::string path = files.dir + "/mods/characters.json";
-    std::vector<std::array<int, 3>> chars;
-    std::ifstream in(path, std::ios::binary);
-    if (in) {
-        std::stringstream ss;
-        ss << in.rdbuf();
-        Json j;
-        if (Json::parse(ss.str(), j))
-            for (auto &c : j["characters"].items) chars.push_back({c[0].i(), c[1].i(), c[2].i()});
-    }
-    in.close();
-    int id = std::max(GAME_CHARACTERS, first);
-    for (auto &c : chars) id = std::max(id, c[0] + 1);
-    int fid = CHARACTER_FILES + id - GAME_CHARACTERS;
-    chars.push_back({id, fid << 16, width});
+std::vector<OwnCharacter> read_own_characters(const Files &files) {
+    std::vector<OwnCharacter> out;
+    std::ifstream in(files.dir + "/mods/characters.json", std::ios::binary);
+    std::stringstream ss;
+    ss << in.rdbuf();
+    Json j;
+    if (in && Json::parse(ss.str(), j))
+        for (auto &c : j["characters"].items)
+            if (c[0].i() >= GAME_CHARACTERS && c[0].i() < 4096) out.push_back({c[0].i(), c[1].i(), c[2].i(), c[3].str});
+    return out;
+}
+
+bool write_own_characters(const Files &files, const std::vector<OwnCharacter> &list, std::string *err) {
+    auto quoted = [](const std::string &s) {
+        std::string q = "\"";
+        for (char c : s) q += c == '"' || c == '\\' ? std::string("\\") + c : std::string(1, c);
+        return q + "\"";
+    };
+    /* [id, animation file entry, width, name]: the port reads the first three */
     std::string out = "{\"characters\":[";
-    for (size_t i = 0; i < chars.size(); i++)
-        out += (i ? ",\n[" : "\n[") + std::to_string(chars[i][0]) + "," + std::to_string(chars[i][1]) + "," + std::to_string(chars[i][2]) + "]";
+    for (size_t i = 0; i < list.size(); i++)
+        out += (i ? ",\n[" : "\n[") + std::to_string(list[i].id) + "," + std::to_string(list[i].animFile) + "," +
+               std::to_string(list[i].width) + "," + quoted(list[i].name) + "]";
     out += "]}\n";
     std::error_code ec;
     std::filesystem::create_directories(files.dir + "/mods", ec);
+    std::string path = files.dir + "/mods/characters.json";
     std::ofstream o(path, std::ios::binary);
-    if (!files.write(fid, file) || !o.write(out.data(), (std::streamsize)out.size())) {
-        if (err) *err = "can't write mods/" + std::to_string(fid) + ".bin or " + path;
+    if (!o.write(out.data(), (std::streamsize)out.size())) {
+        if (err) *err = "can't write " + path;
+        return false;
+    }
+    return true;
+}
+
+int register_character(const Files &files, const std::vector<uint8_t> &file, int width, int first, const std::string &name,
+                       std::string *err) {
+    std::vector<OwnCharacter> chars = read_own_characters(files);
+    int id = std::max(GAME_CHARACTERS, first);
+    for (auto &c : chars) id = std::max(id, c.id + 1);
+    int fid = CHARACTER_FILES + id - GAME_CHARACTERS;
+    chars.push_back({id, fid << 16, width, name});
+    if (!files.write(fid, file)) {
+        if (err) *err = "can't write mods/" + std::to_string(fid) + ".bin";
         return -1;
     }
-    return id;
+    return write_own_characters(files, chars, err) ? id : -1;
+}
+
+bool delete_character(const Files &files, int id, std::string *err) {
+    std::vector<OwnCharacter> chars = read_own_characters(files);
+    auto it = std::find_if(chars.begin(), chars.end(), [id](const OwnCharacter &c) { return c.id == id; });
+    if (it == chars.end()) return true;
+    files.remove(it->animFile >> 16);
+    chars.erase(it);
+    return write_own_characters(files, chars, err);
 }
 
 std::vector<uint8_t> import_character(const Image &sheet, const CharTemplate &t, bool reuse, std::vector<std::string> *problems) {

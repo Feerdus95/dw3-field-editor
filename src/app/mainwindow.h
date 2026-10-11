@@ -6,6 +6,7 @@
 #include <functional>
 #include <map>
 #include <vector>
+#include "characters.h"
 #include "field.h"
 #include "text.h"
 
@@ -27,6 +28,15 @@ class QTreeWidgetItem;
 class QUndoStack;
 
 QImage toQImage(const Image &img);
+/* A template sheet as a PNG with its layout inside; false with err */
+bool writeTemplateSheet(const QString &path, const Image &sheet, const CharTemplate &t, QString *err);
+/* A template sheet and its layout: the PNG's, a .json beside it (older
+   sheets), or the standard's when it is its size. TEMPLATE_NONE with err
+   when the picture can't be read or has no layout */
+enum { TEMPLATE_NONE, TEMPLATE_READ };
+int readTemplateSheet(const QString &path, Image *sheet, CharTemplate *t, QString *err);
+/* the speaker's name of a line as it reads ("Name: text"), or "" */
+QString speakerOf(const std::string &line);
 /* A picture as the editor's, w x h: what it lacks is clear */
 Image fromQImage(const QImage &q, int w, int h);
 
@@ -43,13 +53,15 @@ class MainWindow : public QMainWindow {
     Q_OBJECT
   public:
     MainWindow(const Files &files, std::vector<Stage> stages, const GameText &text, std::vector<int> animFiles);
+    ~MainWindow() override;
     void openStage(const QString &name);
     /* an object at `at` showing a picture (count frames side by side), an
        undo step; false (and why, shown or in err) when it can't be */
     bool addObjectFromFile(const QString &path, int count, QPointF at, QString *err = nullptr);
     bool save();
-    /* a character at `at` with an image slot of its own, an undo step; false with err */
-    bool addCharacter(int id, QPointF at, QString *err);
+    /* a character at `at` with an image slot (giveSlot) and a line of its own (asked for, unless
+       ask is false: "..."), an undo step, selected; false with err ("" when cancelled) */
+    bool addCharacter(int id, QPointF at, QString *err, bool ask = true);
     /* selects "actor:N", "slot:N", "object:N" or "start" (the command line's --select) */
     void selectByName(const QString &what);
 
@@ -144,10 +156,10 @@ class MainWindow : public QMainWindow {
     bool textDialog(GameString &g, const QString &title, const QString &note);
     /* edits string entry of a text file (an undo step) */
     void editString(int key, int entry, const QString &note);
-    /* a new string at the end of a text file, in every language: its entry, or -1; then runs in the
-       same undo step (to use the entry) */
+    /* a new string at the end of a text file, in every language (written in a dialog, unless
+       ask is false): its entry, or -1; then runs in the same undo step (to use the entry) */
     int appendString(const std::function<int(int lang)> &keyOf, const GameString &start, const QString &note,
-                     const std::function<void(int entry)> &then = nullptr);
+                     const std::function<void(int entry)> &then = nullptr, bool ask = true);
     void editTalkText(int entry);
     void newTalkText(int actor, int talk);
     /* a name added to a names file (AREA_NAMES_FILE...) in every language, written at once: its index, or -1 */
@@ -157,9 +169,33 @@ class MainWindow : public QMainWindow {
     QString characterName(int id) const;
     void addEvent(QPointF at);
     void addPictureObject(QPointF at);
-    /* the characters of your own (characters.h) */
-    void exportTemplate(bool blank);
-    void importCharacter();
+    /* the characters (characters_ui.cpp): each one's look and name, from
+       the game's fields (who says its lines, where it stands) or yours */
+    struct CharacterInfo {
+        int id;
+        QString name;
+        QStringList fields;
+        QPixmap thumb;
+        bool mine;
+    };
+    const std::vector<CharacterInfo> &characters() const;
+    mutable std::vector<CharacterInfo> characters_; /* built when first asked; cleared when they change */
+    QString characterLabel(int id) const;            /* "Name (0x1b)", or "Character 0x1b" */
+    QPixmap characterThumb(int id) const;
+    /* a character picked by its look: its id, or -1 */
+    int pickCharacter(const QString &title, int current, bool onlyMine = false);
+    /* actor k of s an image slot: a character of the same look's, else one of
+       its own where VRAM has room (own: always); false with err (its slot as it was) */
+    bool giveSlot(Stage &s, int k, QString *err, bool own = false);
+    /* the other looks drawn through an actor's image slot */
+    QStringList slotSharers(int actor) const;
+    void addCharacterAt(QPointF at);
+    void placeCharacter(int id);
+    /* a template of a character, -1 for the blank standard */
+    void exportTemplate(int id);
+    /* a filled template as a new character, or replace's new drawings */
+    void importCharacter(int replace = -1);
+    void manageCharacters();
     void showEventMarks();
     std::vector<QGraphicsItem *> eventMarks_;
 
