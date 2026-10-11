@@ -351,7 +351,7 @@ int main(int argc, char **argv) {
             return false;
         }
         disc = d;
-        settings.setValue("disc", QFileInfo(path).absoluteFilePath());
+        if (!console) settings.setValue("disc", QFileInfo(path).absoluteFilePath());
         return true;
     };
     auto askDisc = [&]() {
@@ -408,7 +408,8 @@ int main(int argc, char **argv) {
         return 1;
     }
     data = QDir(data).absolutePath();
-    settings.setValue("data", data);
+    /* remembered for the next start: not from a command-line run (--check, --shot...) */
+    if (!console) settings.setValue("data", data);
     /* the game's files: the folder's files/, or the disc */
     if (!QDir(data + "/files").exists() && disc == nullptr) {
         QString last = settings.value("disc").toString();
