@@ -218,7 +218,7 @@ MainWindow::MainWindow(const Files &files, std::vector<Stage> stages, const Game
     QMenu *fileMenu = menuBar()->addMenu("&File");
     fileMenu->addAction("&Save", QKeySequence::Save, this, &MainWindow::save);
     QAction *test = fileMenu->addAction("&Test in game", QKeySequence("F5"), this, &MainWindow::testInGame);
-    test->setToolTip("Saves the field and opens the port on it (F5); with an event selected, the port plays it");
+    test->setToolTip("Saves the field and opens the port on it (F5): with an event selected, the port plays it; with a character, an object or a slot, the player starts beside it");
     fileMenu->addSeparator();
     fileMenu->addAction("&New field...", QKeySequence::New, this, &MainWindow::newField)
         ->setToolTip("A field of your own: a copy of this one, or an empty map");
@@ -1568,6 +1568,16 @@ void MainWindow::testInGame() {
     /* an event selected: the port starts it once the field runs */
     if (selKind_ == KIND_EVENT && selIndex_ >= 0 && selIndex_ < (int)field_.stage.events.size())
         args << "--event" << QString::number(field_.stage.events[selIndex_].id);
+    /* a character, an object or a slot's cells selected: the player starts beside it */
+    QPoint at(-1, -1);
+    const Stage &s = field_.stage;
+    if (selKind_ == KIND_ACTOR && selIndex_ >= 0 && selIndex_ < (int)s.actors.size() && actorGroup_[selIndex_] >= 0)
+        at = QPoint(s.actors[selIndex_].x, s.actors[selIndex_].y + 24);
+    else if (selKind_ == KIND_OBJECT && selIndex_ >= 0 && selIndex_ < (int)s.objects.size())
+        at = QPoint(s.objects[selIndex_].x, s.objects[selIndex_].y + 24);
+    else if (selKind_ == KIND_SLOT && selIndex_ >= 0 && selIndex_ < (int)slotCells_.size() && !slotCells_[selIndex_].isNull())
+        at = slotCells_[selIndex_].center() + QPoint(0, slotCells_[selIndex_].height() / 2 + 16);
+    if (at.x() >= 0) args << "--at" << QString("%1,%2").arg(std::clamp(at.x(), 0, field_.width() - 1)).arg(std::clamp(at.y(), 0, field_.height() - 1));
     if (!QProcess::startDetached(exe, args, QFileInfo(exe).absolutePath()))
         QMessageBox::critical(this, "Test in game", "Can't start " + exe);
     else statusBar()->showMessage("The port goes to this field once past its first screen", 6000);
