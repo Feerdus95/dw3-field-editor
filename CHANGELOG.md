@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.1
+
+- **Fixed:** a battle area painted over with No battles could stay in a few pixels a
+  stroke missed, too small to see, and still start battles in the game. Each painted
+  area's card in **Battles** now says how much of the map it covers (in red when only a
+  few pixels are left), and **Erase it from the map** clears all of it in one step.
+
 ## v0.2.0
 
 - **Battles** in plain words: a card per painted battle area in its map color, how often
