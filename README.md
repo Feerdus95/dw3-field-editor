@@ -277,6 +277,25 @@ the edges a step too high blocked; what stands in front of a character goes to t
 layer; and the player starts on the floor nearest the middle. Paint the floor after to
 fix what it got wrong.
 
+### Sharing fields
+
+**File > Export fields...** writes the fields you pick, as saved, to one `.dw3field`
+file to share. The open field is ticked, with the new fields its exits lead to (or, for a
+new field, the fields whose exits lead to it): send them together, or the exits lead
+nowhere. **File > Import fields...** adds someone's file to your work folder.
+
+- **Nothing of the game's goes in it.** A file of the field's is kept as what differs
+  from the game's own, and the rest is read from the importer's disc; a text goes only
+  when it is new or changed. Both of you need the same disc (Digimon World 2003, Europe):
+  an import from another refuses.
+- **What clashes with yours gets other numbers:** a new field whose mode you have
+  already (and its files), a character of yours with the same number (one with the same
+  drawings is used as it is), the texts and banner names added (an identical one already
+  there is reused), and a flag the editor gave out that your fields use too. Its exits,
+  lines and event scripts follow.
+- **A game field you changed too is replaced** by the file's, after asking.
+- Flag names come along when you haven't named that flag.
+
 ## The native port
 
 The native port is a PC version of the game built from
@@ -310,7 +329,8 @@ The port's data folder needs the fields' tables, which the port writes once:
     dw3fe --selftest                   checks what saving rests on, over every field:
                                        each logic map, background tile, text and event
                                        script written and read back, the maps resized
-                                       back and forth, a sprite imported
+                                       back and forth, a sprite imported, a shared
+                                       file's delta
     dw3fe --encounters                 prints the game's encounters: their enemies (name,
                                        level, HP, MP) and the fields' areas with them
     dw3fe wstag245 --select actor:19   opens a field with something selected
@@ -333,6 +353,9 @@ The port's data folder needs the fields' tables, which the port writes once:
     dw3fe wstag330 --add-character 196 960,990
                                        puts a character (hex) at a point of a field
                                        with an image slot and the line "...", and saves
+    dw3fe --export-fields out.dw3field wstag330,new2f0
+                                       saved fields as a file to share
+    dw3fe --import-fields in.dw3field  someone's shared fields into yours
 
 ## Building from source
 

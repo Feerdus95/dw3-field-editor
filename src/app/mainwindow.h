@@ -67,6 +67,12 @@ class MainWindow : public QMainWindow {
     /* a character at `at` with an image slot (giveSlot) and a line of its own (asked for, unless
        ask is false: "..."), an undo step, selected; false with err ("" when cancelled) */
     bool addCharacter(int id, QPointF at, QString *err, bool ask = true);
+    /* fields shared (share_ui.cpp): the saved fields named into a .dw3field
+       file, false with err; a file's fields into this game's (ask: before
+       anything is written), false with what failed in report ("" when
+       cancelled), else what was done */
+    bool exportFields(const QString &path, const QStringList &names, QString *err);
+    bool importFields(const QString &path, bool ask, QString *report);
     /* selects "actor:N", "slot:N", "object:N" or "start" (the command line's --select) */
     void selectByName(const QString &what);
 
@@ -145,6 +151,8 @@ class MainWindow : public QMainWindow {
     void importBackground();
     void exportBackground();
     void newField();
+    void exportFieldsDialog();
+    void importFieldsDialog();
     /* applies change to the map as one undo step; false (and nothing changed) when it fails */
     bool changeMap(const QString &what, const std::function<bool(QString *err)> &change);
     bool canEditBackground();

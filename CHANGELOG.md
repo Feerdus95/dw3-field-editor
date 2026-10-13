@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **Sharing fields:** File > **Export fields...** writes the fields you pick to one
+  `.dw3field` file, and **Import fields...** adds someone's to yours. Nothing of the
+  game's goes in it: files go as what differs from the game's, texts only when new or
+  changed. New fields, characters, texts and the editor's flags that clash with yours
+  get other numbers, and the exits, lines and scripts follow. Also `--export-fields` and
+  `--import-fields`.
+
 ## v0.2.1
 
 - **Fixed:** a battle area painted over with No battles could stay in a few pixels a

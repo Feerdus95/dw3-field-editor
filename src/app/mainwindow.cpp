@@ -226,6 +226,11 @@ MainWindow::MainWindow(const Files &files, std::vector<Stage> stages, const Game
         ->setToolTip("A field of your own: a copy of this one, or an empty map");
     revertAct_ = fileMenu->addAction("&Revert to the game's...", this, &MainWindow::revertStage);
     fileMenu->addSeparator();
+    fileMenu->addAction("&Export fields...", this, &MainWindow::exportFieldsDialog)
+        ->setToolTip("Fields you changed or made, as one file to share: nothing of the game's goes in it");
+    fileMenu->addAction("&Import fields...", this, &MainWindow::importFieldsDialog)
+        ->setToolTip("Someone's shared fields into yours: what would clash with your own gets other numbers");
+    fileMenu->addSeparator();
     fileMenu->addAction("&Quit", QKeySequence::Quit, this, &QWidget::close);
     QMenu *editMenu = menuBar()->addMenu("&Edit");
     QAction *undoAct = undo_->createUndoAction(this, "&Undo");

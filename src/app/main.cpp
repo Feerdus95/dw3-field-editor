@@ -26,6 +26,10 @@
                                     a filled template as a character of your own
    dw3fe stage --add-character HEX X,Y
                                     a character with a slot of its own at a point, saved
+   dw3fe --export-fields out.dw3field stage[,stage...]
+                                    saved fields as a file to share
+   dw3fe --import-fields in.dw3field
+                                    someone's shared fields into yours
 
    The stages' tables come from the disc (DATA/stages, made once), or from the
    port: dw2003 --dump-stages DATA/stages. */
@@ -53,6 +57,7 @@
 #include "characters.h"
 #include "disc.h"
 #include "codes.h"
+#include "delta.h"
 #ifdef _WIN32
 #include <io.h>
 #include <windows.h>
@@ -349,6 +354,15 @@ static int run_selftest(const Files &files, const std::vector<Stage> &stages, co
             applied.loadSections(j);
             if (!stage_mod_json(applied, edited).empty()) printf("%s: the mod doesn't carry the change\n", s.name.c_str()), bad++;
         }
+        /* a shared field's file: its map file with some bytes changed, as a
+           delta from the game's that carries little more than them */
+        if (std::vector<uint8_t> orig = files.readOriginal(s.mapFile); orig.size() > 4096) {
+            std::vector<uint8_t> changed = orig, back;
+            for (size_t k = 2048; k < 3048; k++) changed[k] ^= 0x5A;
+            std::vector<uint8_t> d = delta_encode(changed, {&orig});
+            if (!delta_decode(d, {&orig}, &back) || back != changed || d.size() > 1200)
+                printf("%s: the map file's delta doesn't come back (%zu bytes)\n", s.name.c_str(), d.size()), bad++;
+        }
     }
     /* the background: every tile encoded and read back, the same when it has
        few enough colors; the map file rebuilt as it was */
@@ -475,7 +489,7 @@ int main(int argc, char **argv) {
     app.setOrganizationName("dw3fe");
     app.setStyle(QStyleFactory::create("Fusion"));
 
-    QString data, discPath, shot, open, selectWhat, newField, size, background, toyagumon, addObject, addAt, exportId, exportTo, importFrom, addChar, windowShot;
+    QString data, discPath, shot, open, selectWhat, newField, size, background, toyagumon, addObject, addAt, exportId, exportTo, importFrom, addChar, windowShot, exportFields, fieldNames, importFields;
     int frames = 1, cellPx = 64;
     bool check = false, selftest = false, encounters = false;
     QStringList args = app.arguments();
@@ -504,6 +518,8 @@ int main(int argc, char **argv) {
         else if (args[i] == "--export-template" && i + 2 < args.size()) exportId = args[++i], exportTo = args[++i];
         else if (args[i] == "--import-character" && i + 1 < args.size()) importFrom = args[++i];
         else if (args[i] == "--add-character" && i + 2 < args.size()) addChar = args[++i], addAt = args[++i];
+        else if (args[i] == "--export-fields" && i + 2 < args.size()) exportFields = args[++i], fieldNames = args[++i];
+        else if (args[i] == "--import-fields" && i + 1 < args.size()) importFields = args[++i];
         else if (args[i] == "--check") check = true;
         else if (args[i] == "--selftest") selftest = true;
         else if (args[i] == "--encounters") encounters = true;
@@ -512,7 +528,8 @@ int main(int argc, char **argv) {
         else open = args[i];
     }
     bool console = check || selftest || !shot.isEmpty() || !newField.isEmpty() || !addObject.isEmpty() ||
-                   !exportId.isEmpty() || !importFrom.isEmpty() || !addChar.isEmpty();
+                   !exportId.isEmpty() || !importFrom.isEmpty() || !addChar.isEmpty() ||
+                   !exportFields.isEmpty() || !importFields.isEmpty();
     if (console) attach_console();
 
     /* the data folder, the port's or the editor's own made from the disc:
@@ -759,6 +776,14 @@ int main(int argc, char **argv) {
     }
 
     MainWindow w(files, std::move(stages), text, animFiles);
+    if (!exportFields.isEmpty() || !importFields.isEmpty()) {
+        QString msg;
+        bool ok = exportFields.isEmpty() ? w.importFields(importFields, false, &msg)
+                                         : w.exportFields(exportFields, fieldNames.split(','), &msg);
+        if (!ok) return fprintf(stderr, "%s\n", qPrintable(msg)), 1;
+        printf("%s\n", qPrintable(exportFields.isEmpty() ? msg : "exported to " + exportFields));
+        return 0;
+    }
     if (!addChar.isEmpty()) {
         /* a character (hex number) with a slot of its own at a point of a stage, saved */
         QStringList xy = addAt.split(',');
