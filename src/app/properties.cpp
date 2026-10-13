@@ -693,7 +693,8 @@ void MainWindow::battlesForm(QFormLayout *f) {
                 }
     }
     const LogicMap &areas = field_.maps[MAP_AREAS];
-    std::set<int> painted(areas.px.begin(), areas.px.end());
+    std::map<int, int> painted; /* each value's pixels */
+    for (uint8_t v : areas.px) painted[v]++;
     if (!painted.count(1) && !painted.count(2) && !painted.count(3) && !painted.count(4))
         f->addRow(richLabel("<span style='color:#999'>No battle areas are painted: walking here starts no battle. "
                             "Paint some (Paint areas) to have them.</span>"));
@@ -749,6 +750,20 @@ void MainWindow::battlesForm(QFormLayout *f) {
             for (auto &bt : ar.battles) {
                 if (!count[bt.encounter]++) order.push_back(bt.encounter);
                 if (bt.encounter) stages[bt.stage]++, musics[bt.music]++;
+            }
+            if (on) {
+                /* how much of the map: a few pixels left from a stroke start battles too */
+                int px = painted[a + 1];
+                auto *row = new QHBoxLayout;
+                auto *much = new QLabel(px < 64 * 4 ? QString("Painted: only %1 pixels, a few spots").arg(px)
+                                                    : QString("Painted: %1% of the map").arg(std::max(1, (int)(100.0 * px / areas.px.size()))));
+                if (px < 64 * 4) much->setStyleSheet("color:#f55");
+                auto *erase = new QToolButton;
+                erase->setText("Erase it from the map");
+                erase->setToolTip("Every cell of this area becomes No battles (one undo step)");
+                connect(erase, &QToolButton::clicked, this, [this, a] { eraseArea(a + 1); });
+                row->addWidget(much, 1), row->addWidget(erase);
+                bf->addRow(row);
             }
             if (events)
                 bf->addRow(richLabel("<span style='color:#999'>Events start these by number (Battle 1 to 8)" +

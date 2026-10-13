@@ -189,6 +189,8 @@ class MainWindow : public QMainWindow {
     std::vector<LibraryObject> library_;
     const std::vector<LibraryObject> &objectLibrary();
     void addLibraryObject(QPointF at);
+    /* every cell of a battle area made 0, one undo step */
+    void eraseArea(int area);
     /* the characters (characters_ui.cpp): each one's look and name, from
        the game's fields (who says its lines, where it stands) or yours */
     struct CharacterInfo {

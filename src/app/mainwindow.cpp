@@ -1414,6 +1414,19 @@ void MainWindow::endStroke(QPointF p) {
     updateTitle();
 }
 
+void MainWindow::eraseArea(int area) {
+    LogicMap &m = field_.maps[MAP_AREAS];
+    std::vector<uint8_t> before = m.px;
+    std::replace(m.px.begin(), m.px.end(), (uint8_t)area, (uint8_t)0);
+    if (m.px == before) return;
+    std::vector<uint8_t> after = m.px;
+    m.px = before;
+    /* as a stroke over the whole map: done here, the command's first redo skips it */
+    setMapRegion(MAP_AREAS, QRect(0, 0, m.w, m.h), after);
+    undo_->push(new PaintCommand(this, MAP_AREAS, QRect(0, 0, m.w, m.h), std::move(before), std::move(after),
+                                 area == 4 ? "Erase the event battles' area" : QString("Erase battle area %1").arg(area)));
+}
+
 /* --- saving and testing --- */
 
 /* Writes the field's changes where the port reads them: the tables to
