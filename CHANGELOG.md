@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.3.0
 
 - **Sharing fields:** File > **Export fields...** writes the fields you pick to one
   `.dw3field` file, and **Import fields...** adds someone's to yours. Nothing of the

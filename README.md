@@ -406,9 +406,9 @@ To write them again, clone dw3_decomp and run:
 
 ### Making a release
 
-    python tools/package.py v0.2.1 [--data DIR]
+    python tools/package.py v0.3.0 [--data DIR]
 
-builds, then packs `build/dw3-field-editor-v0.2.1-win64.zip`: the exe, its DLLs, this
+builds, then packs `build/dw3-field-editor-v0.3.0-win64.zip`: the exe, its DLLs, this
 README, the changelog, the license and credits, and `licenses/` with the license of every DLL, found
 through the MSYS2 package it comes from. It then unpacks the zip to a temporary folder
 and checks that it runs on its own and reads every field, from the data folder the
