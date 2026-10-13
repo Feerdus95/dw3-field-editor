@@ -60,6 +60,9 @@ class MainWindow : public QMainWindow {
     /* an object at `at` showing a picture (count frames side by side), an
        undo step; false (and why, shown or in err) when it can't be */
     bool addObjectFromFile(const QString &path, int count, QPointF at, QString *err = nullptr);
+    /* an object at `at` showing frames (each anchored at its bottom middle), an undo step named what */
+    bool addObjectFrames(const QString &what, const std::vector<Image> &frames, QPointF at, int delay = 8, int depth = 5,
+                         int margin = 64, QString *err = nullptr);
     bool save();
     /* a character at `at` with an image slot (giveSlot) and a line of its own (asked for, unless
        ask is false: "..."), an undo step, selected; false with err ("" when cancelled) */
@@ -176,6 +179,16 @@ class MainWindow : public QMainWindow {
     QString characterName(int id) const;
     void addEvent(QPointF at);
     void addPictureObject(QPointF at);
+    /* the objects of every field (objects_ui.cpp), drawn as their fields
+       draw them, each look once; read the first time they're asked for */
+    struct LibraryObject {
+        QString field;
+        int index, below, delay, depth, margin;
+        std::vector<Image> frames;
+    };
+    std::vector<LibraryObject> library_;
+    const std::vector<LibraryObject> &objectLibrary();
+    void addLibraryObject(QPointF at);
     /* the characters (characters_ui.cpp): each one's look and name, from
        the game's fields (who says its lines, where it stands) or yours */
     struct CharacterInfo {

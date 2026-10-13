@@ -1182,6 +1182,8 @@ void MainWindow::addItems(QMenu *menu, QPointF p) {
         });
     menu->addAction("Add an object from a picture...", [this, p] { addPictureObject(p); })
         ->setToolTip("A sprite of your own: a picture, or the frames of an animation side by side");
+    menu->addAction("Add an object from another field...", [this, p] { addLibraryObject(p); })
+        ->setToolTip("Any object of the game's fields, copied into this one");
     menu->addAction("Add an event", [this, p] { addEvent(p); })->setToolTip("A script that a slot of type Event or a line starts");
     menu->addAction("Add a slot (exit, climb, event...)", [this] {
         Stage s = field_.stage;
@@ -1970,10 +1972,15 @@ bool MainWindow::addObjectFromFile(const QString &path, int count, QPointF at, Q
         return false;
     }
     int fw = pic.width() / count;
-    QString why;
-    return changeMap("Add an object from a picture", [&](QString *err) {
-        std::vector<Image> frames;
-        for (int i = 0; i < count; i++) frames.push_back(fromQImage(pic.copy(i * fw, 0, fw, pic.height()), fw, pic.height()));
+    std::vector<Image> frames;
+    for (int i = 0; i < count; i++) frames.push_back(fromQImage(pic.copy(i * fw, 0, fw, pic.height()), fw, pic.height()));
+    return addObjectFrames("Add an object from a picture", frames, at, 8, 5, 64, errOut);
+}
+
+bool MainWindow::addObjectFrames(const QString &what, const std::vector<Image> &frames, QPointF at, int delay, int depth,
+                                 int margin, QString *errOut) {
+    int count = (int)frames.size();
+    return changeMap(what, [&](QString *err) {
         std::string e;
         field_.vramTaken = field_vram(files_, field_.stage, field_.imagesData, animFiles_, false);
         int id = field_.importSprite(frames, &e);
@@ -1985,7 +1992,7 @@ bool MainWindow::addObjectFromFile(const QString &path, int count, QPointF at, Q
         /* the images are the field's own file from now on */
         Stage &s = field_.stage;
         s.imageFile = own_images_fid(s), s.imageEntry = 0;
-        Object o{1, 0, 64, 5, id, count > 1, id, id + count - 1, 8, 0, qRound(at.x()), qRound(at.y()), 0, 0};
+        Object o{1, 0, margin, depth, id, count > 1, id, id + count - 1, delay, 0, qRound(at.x()), qRound(at.y()), 0, 0};
         s.objects.push_back(o);
         return true;
     });

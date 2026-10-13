@@ -217,6 +217,10 @@ the frames will be cut first. The picture gets 15 colors of its own and is ancho
 its bottom middle, where you clicked. A field has room for three pages of object
 pictures, so the fields that use all three can't take more.
 
+**Right click > Add an object from another field...** lists every object of the game's
+fields (each look once, searchable by field) and copies the one you pick into this
+field's own pictures, animation included, standing where you clicked.
+
 ### Characters of your own
 
 A new character is drawn to the game's own measure: a sprite of 15 colors plus
