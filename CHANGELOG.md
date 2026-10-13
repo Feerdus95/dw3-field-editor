@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.2.0
 
 - **Battles** in plain words: a card per painted battle area in its map color, how often
   battles come in steps, the battlefield and music named by the fields that have them,
