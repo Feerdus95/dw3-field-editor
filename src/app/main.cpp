@@ -15,6 +15,8 @@
    dw3fe --dump-disc IMAGE DIR      the fields' tables from the disc into DIR, as the port's dump
    dw3fe --new-field stage [--size WxH] [--background picture.png]
                                     a new field from a stage: a copy, or an empty map
+         [--toyagumon DIR [--cell N]]
+                                    its map a Toyagumon3D game export (unzipped), a cell N pixels wide
    dw3fe stage --add-object picture.png X,Y [--frames N]
                                     an object from a picture at a point, saved
    dw3fe --export-template HEX|standard out.png
@@ -40,6 +42,7 @@
 #include <QScrollArea>
 #include <QTimer>
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <map>
 #include <memory>
@@ -109,6 +112,179 @@ static QImage compose(const Field &f) {
         }
     }
     return img;
+}
+
+/* A Toyagumon3D "Export for game" folder (world.png, depth.png,
+   world_grid.json and .bin) as an empty map: the picture scaled so a cell's
+   top is cellPx wide, in the middle of whole tiles.
+   The floor, from the grid: walkable over each cell's top, higher floors and
+   nearer ones over the rest, and blocked along a cell's edges where the
+   floor next to it isn't within a half block (lower, or none: water, the
+   island's rim). A world of sculpted ground has none there: then from
+   depth.png, each pixel's place in the world, walkable where it is flat and
+   above the lowest surface (the water), blocked where the next pixel is a
+   half block higher or lower, in 8-pixel cells.
+   The game has no depth test, only a background drawn over the characters:
+   a pixel goes there when it is nearer than a character standing on the
+   floor below it (a billboard CHAR_PX tall, as deep as its feet less its
+   height) would be. The start: the floor nearest the middle */
+struct ToyaMap {
+    int w = 0, h = 0, startX = 0, startY = 0;
+    Image bg, front;
+    std::vector<uint8_t> floor;
+};
+static bool load_toyagumon(const QString &dir, int cellPx, ToyaMap *t, QString *err) {
+    QFile jf(dir + "/world_grid.json"), bf(dir + "/world_grid.bin");
+    Json j;
+    QImage pic(dir + "/world.png"), dimg(dir + "/depth.png");
+    if (!jf.open(QIODevice::ReadOnly) || !Json::parse(jf.readAll().toStdString(), j) || !bf.open(QIODevice::ReadOnly) ||
+        pic.isNull() || dimg.isNull())
+        return *err = "no world.png, depth.png, world_grid.json and world_grid.bin in " + dir, false;
+    QByteArray grid = bf.readAll();
+    const Json &v = j["view"], &dj = v["depth"];
+    double px[4], py[4], dc[4], bh = j["blockHeight"].num, nearD = dj["near"].num, farD = dj["far"].num;
+    for (int k = 0; k < 4; k++) px[k] = v["px"][k].num, py[k] = v["py"][k].num, dc[k] = dj["coefficients"][k].num;
+    int gw = j["width"].i(), gh = j["height"].i(), fpc = j["floorsPerCell"].i(), oi = j["origin"]["i"].i(),
+        ok = j["origin"]["j"].i();
+    if (gw < 1 || gh < 1 || fpc < 1 || grid.size() < (qsizetype)gw * gh * fpc || px[0] == 0)
+        return *err = "world_grid.bin doesn't match world_grid.json", false;
+    double s = cellPx / (2 * std::fabs(px[0]));
+    int pw = qRound(pic.width() * s), ph = qRound(pic.height() * s);
+    t->w = (pw + 127) / 128, t->h = (ph + 127) / 128;
+    if (t->w * t->h > MAX_TILES)
+        return *err = QString("%1 x %2 tiles, more than %3: give a smaller --cell").arg(t->w).arg(t->h).arg(MAX_TILES), false;
+    int ox = (t->w * 128 - pw) / 2, oy = (t->h * 128 - ph) / 2, W = t->w * 128, H = t->h * 128;
+    QImage canvas(W, H, QImage::Format_ARGB32);
+    canvas.fill(Qt::black);
+    QPainter p(&canvas);
+    p.drawImage(ox, oy, pic.scaled(pw, ph, Qt::IgnoreAspectRatio, Qt::SmoothTransformation));
+    p.end();
+
+    /* each pixel's depth (-1: nothing) and its height in the world: the
+       picture's x, y and the depth undone (the view's three rows inverted) */
+    dimg = dimg.convertToFormat(QImage::Format_RGB32);
+    std::vector<double> depth((size_t)W * H, -1), height((size_t)W * H, 0);
+    double m[3][3] = {{px[0], px[1], px[2]}, {py[0], py[1], py[2]}, {dc[0], dc[1], dc[2]}};
+    double det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
+                 m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+    /* the middle row of the inverse: the height from the three */
+    double hy[3] = {-(m[1][0] * m[2][2] - m[1][2] * m[2][0]) / det, (m[0][0] * m[2][2] - m[0][2] * m[2][0]) / det,
+                    -(m[0][0] * m[1][2] - m[0][2] * m[1][0]) / det};
+    double lowest = 1e18;
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++) {
+            int sx = (int)((x - ox) / s), sy = (int)((y - oy) / s);
+            if (x < ox || y < oy || sx >= dimg.width() || sy >= dimg.height()) continue;
+            QRgb e = dimg.pixel(sx, sy);
+            if (qBlue(e) != 255) continue;
+            size_t at = (size_t)y * W + x;
+            depth[at] = nearD + (qRed(e) << 8 | qGreen(e)) / 65535.0 * (farD - nearD);
+            double X = (x - ox) / s - px[3], Y = (y - oy) / s - py[3];
+            height[at] = hy[0] * X + hy[1] * Y + hy[2] * (depth[at] - dc[3]);
+            lowest = std::min(lowest, height[at]);
+        }
+
+    auto floorAt = [&](int i, int k, int f) { return (uint8_t)grid[(k * gw + i) * fpc + f]; };
+    auto pt = [&](double i, double y, double k) { /* (i, k) in the grid, from its origin */
+        i += oi, k += ok;
+        return QPointF(ox + s * (px[0] * i + px[1] * y + px[2] * k + px[3]), oy + s * (py[0] * i + py[1] * y + py[2] * k + py[3]));
+    };
+    struct Cell { int i, k, b; };
+    std::vector<Cell> cells;
+    for (int k = 0; k < gh; k++)
+        for (int i = 0; i < gw; i++)
+            for (int f = 0; f < fpc; f++)
+                if (floorAt(i, k, f)) cells.push_back({i, k, floorAt(i, k, f)});
+    t->floor.assign((size_t)W * H, 0);
+    if (!cells.empty()) {
+        /* low to high, then far to near (up the picture first) */
+        std::stable_sort(cells.begin(), cells.end(), [&](const Cell &a, const Cell &b) {
+            return a.b != b.b ? a.b < b.b : py[0] * a.i + py[2] * a.k < py[0] * b.i + py[2] * b.k;
+        });
+        QImage fl(W, H, QImage::Format_Grayscale8);
+        fl.fill(0);
+        QPainter q(&fl);
+        q.setPen(Qt::NoPen), q.setBrush(Qt::white);
+        for (auto &c : cells) {
+            double y = (c.b - 1) / 2.0 * bh;
+            QPointF d[4] = {pt(c.i, y, c.k), pt(c.i + 1, y, c.k), pt(c.i + 1, y, c.k + 1), pt(c.i, y, c.k + 1)};
+            q.drawPolygon(d, 4);
+        }
+        /* the edges a step too high: on the higher cell's side only, as its top hides the lower one's */
+        q.setPen(QPen(Qt::black, 6, Qt::SolidLine, Qt::FlatCap));
+        static const int SIDES[4][6] = {{1, 0, 1, 0, 1, 1}, {-1, 0, 0, 0, 0, 1}, {0, 1, 0, 1, 1, 1}, {0, -1, 0, 0, 1, 0}};
+        for (auto &c : cells)
+            for (auto &e : SIDES) {
+                int ni = c.i + e[0], nk = c.k + e[1], top = 0;
+                bool joins = false;
+                for (int f = 0; ni >= 0 && nk >= 0 && ni < gw && nk < gh && f < fpc; f++) {
+                    int b = floorAt(ni, nk, f);
+                    joins |= b && std::abs(b - c.b) <= 1, top = std::max(top, b);
+                }
+                if (joins || top > c.b) continue;
+                double y = (c.b - 1) / 2.0 * bh;
+                q.drawLine(pt(c.i + e[2], y, c.k + e[3]), pt(c.i + e[4], y, c.k + e[5]));
+            }
+        q.end();
+        for (int y = 0; y < H; y++)
+            for (int x = 0; x < W; x++) t->floor[(size_t)y * W + x] = fl.constScanLine(y)[x] > 127;
+    } else {
+        /* flat: a pixel up the picture on a wall is this much higher */
+        double wall = 1 / (s * std::fabs(py[1]));
+        std::vector<uint8_t> walk((size_t)W * H, 0);
+        for (int y = 1; y < H - 1; y++)
+            for (int x = 1; x < W - 1; x++) {
+                size_t at = (size_t)y * W + x;
+                if (depth[at] < 0 || height[at] < lowest + bh / 4) continue;
+                bool ok = true;
+                for (int n : {-1, 1, -W, W}) {
+                    double dh = depth[at + n] < 0 ? 1e9 : std::fabs(height[at + n] - height[at]);
+                    ok &= dh < wall * 0.35;
+                }
+                walk[at] = ok;
+            }
+        /* in the logic map's smallest cells: walkable when most of it is */
+        for (int y = 0; y < H; y += 8)
+            for (int x = 0; x < W; x += 8) {
+                int n = 0;
+                for (int b = 0; b < 8; b++)
+                    for (int a = 0; a < 8; a++) n += walk[(size_t)(y + b) * W + x + a];
+                for (int b = 0; n > 40 && b < 8; b++)
+                    for (int a = 0; a < 8; a++) t->floor[(size_t)(y + b) * W + x + a] = 1;
+            }
+    }
+
+    /* the front: depth.png's depth against a character's on the floor below */
+    QImage front(W, H, QImage::Format_ARGB32);
+    front.fill(Qt::transparent);
+    const int CHAR_PX = 40;
+    const double upDepth = dc[1] / (s * std::fabs(py[1])); /* a sprite's depth, a pixel up */
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++) {
+            double dp = depth[(size_t)y * W + x];
+            if (dp < 0) continue;
+            bool over = false;
+            for (int up = 2; up <= CHAR_PX && !over && y + up < H; up += 2)
+                for (int dx : {-6, 0, 6}) {
+                    size_t at = (size_t)(y + up) * W + std::clamp(x + dx, 0, W - 1);
+                    if (t->floor[at] && depth[at] >= 0 && dp < depth[at] + upDepth * up - 0.25) {
+                        over = true;
+                        break;
+                    }
+                }
+            if (over) front.setPixel(x, y, canvas.pixel(x, y));
+        }
+    t->bg = fromQImage(canvas, W, H);
+    t->front = fromQImage(front, W, H);
+
+    /* the start, on the floor nearest the middle */
+    double best = 1e18;
+    for (int y = 0; y < H; y += 4)
+        for (int x = 0; x < W; x += 4)
+            if (t->floor[(size_t)y * W + x] && std::hypot(x - W / 2.0, y - H / 2.0) < best)
+                best = std::hypot(x - W / 2.0, y - H / 2.0), t->startX = x * 256, t->startY = y * 256;
+    if (best == 1e18) return *err = "the world has no floor", false;
+    return true;
 }
 
 static uint32_t rd32le(const uint8_t *p) { return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24; }
@@ -298,9 +474,9 @@ int main(int argc, char **argv) {
     app.setOrganizationName("dw3fe");
     app.setStyle(QStyleFactory::create("Fusion"));
 
-    QString data, discPath, shot, open, selectWhat, newField, size, background, addObject, addAt, exportId, exportTo, importFrom, addChar, windowShot;
-    int frames = 1;
-    bool check = false, selftest = false;
+    QString data, discPath, shot, open, selectWhat, newField, size, background, toyagumon, addObject, addAt, exportId, exportTo, importFrom, addChar, windowShot;
+    int frames = 1, cellPx = 64;
+    bool check = false, selftest = false, encounters = false;
     QStringList args = app.arguments();
     if (args.size() == 4 && args[1] == "--dump-disc") {
         /* the fields' tables from the disc, as the port's --dump-stages writes them */
@@ -320,6 +496,8 @@ int main(int argc, char **argv) {
         else if (args[i] == "--new-field" && i + 1 < args.size()) newField = args[++i];
         else if (args[i] == "--size" && i + 1 < args.size()) size = args[++i];
         else if (args[i] == "--background" && i + 1 < args.size()) background = args[++i];
+        else if (args[i] == "--toyagumon" && i + 1 < args.size()) toyagumon = args[++i];
+        else if (args[i] == "--cell" && i + 1 < args.size()) cellPx = args[++i].toInt();
         else if (args[i] == "--add-object" && i + 2 < args.size()) addObject = args[++i], addAt = args[++i];
         else if (args[i] == "--frames" && i + 1 < args.size()) frames = args[++i].toInt();
         else if (args[i] == "--export-template" && i + 2 < args.size()) exportId = args[++i], exportTo = args[++i];
@@ -477,20 +655,29 @@ int main(int argc, char **argv) {
             return fprintf(stderr, "--size: WxH tiles, at most %d of them\n", MAX_TILES), 1;
         NewField nf;
         std::string err;
+        ToyaMap toya;
+        QString toyaErr;
+        if (!toyagumon.isEmpty() && !load_toyagumon(toyagumon, cellPx, &toya, &toyaErr))
+            return fprintf(stderr, "--toyagumon: %s\n", qPrintable(toyaErr)), 1;
+        if (!toyagumon.isEmpty()) w = toya.w, h = toya.h;
         if (!mode) return fprintf(stderr, "no mode is left for a new field\n"), 1;
-        if (!make_new_field(files, f, mode, st.modes[0].area, st.modes[0].place, w, h, &nf, &err) || !write_new_field(files, nf, &err))
+        if (!make_new_field(files, f, mode, st.modes[0].area, st.modes[0].place, w, h, &nf, &err,
+                            toyagumon.isEmpty() ? nullptr : &toya.floor))
             return fprintf(stderr, "%s\n", err.c_str()), 1;
-        if (!background.isEmpty()) {
+        if (!toyagumon.isEmpty()) nf.stage.startX = toya.startX, nf.stage.startY = toya.startY;
+        if (!write_new_field(files, nf, &err)) return fprintf(stderr, "%s\n", err.c_str()), 1;
+        if (!background.isEmpty() || !toyagumon.isEmpty()) {
             Field n;
             QImage pic(background);
-            if (pic.isNull() || !n.load(files, nf.stage)) return fprintf(stderr, "can't read %s\n", qPrintable(background)), 1;
-            Image mid = fromQImage(pic, n.width(), n.height()), clear;
+            if ((toyagumon.isEmpty() && pic.isNull()) || !n.load(files, nf.stage))
+                return fprintf(stderr, "can't read %s\n", qPrintable(background)), 1;
+            Image mid = toyagumon.isEmpty() ? fromQImage(pic, n.width(), n.height()) : toya.bg, clear;
             clear.resize(n.width(), n.height());
-            const Image *layers[3] = {&mid, &clear, &clear};
+            const Image *layers[3] = {&mid, &clear, toyagumon.isEmpty() ? &clear : &toya.front};
             int changed = 0;
             if (!n.importLayers(layers, &err, &changed) || !files.write(nf.stage.mapFile, n.mapFileData()))
                 return fprintf(stderr, "the background: %s\n", err.c_str()), 1;
-            printf("%d tiles from %s\n", changed, qPrintable(background));
+            printf("%d tiles from %s\n", changed, qPrintable(toyagumon.isEmpty() ? background : toyagumon));
         }
         printf("%s: mode %d (0x%X), on %s's code\n", nf.stage.name.c_str(), mode, mode, nf.stage.templ.c_str());
         return 0;

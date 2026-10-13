@@ -258,6 +258,17 @@ empty map of the size you choose, walkable all over.
 - A new field has no "visited" flag (the game has those for modes up to 0x2EF only).
 - **File > Delete this new field** removes it and its files.
 
+A new field's map can also come from a 3D world built in Toyagumon3D ("Export for game",
+unzipped), from the command line:
+
+    dw3fe --new-field wstag330 --toyagumon path/to/export [--cell 64]
+
+The picture becomes the background, scaled so a block's top is 64 pixels wide (`--cell`);
+the floor comes from the world's blocks (or, for sculpted ground, from its depth), with
+the edges a step too high blocked; what stands in front of a character goes to the front
+layer; and the player starts on the floor nearest the middle. Paint the floor after to
+fix what it got wrong.
+
 ## The native port
 
 The native port is a PC version of the game built from
@@ -300,6 +311,8 @@ The port's data folder needs the fields' tables, which the port writes once:
                                        makes a new field from one: a copy, or an
                                        empty map of 8 x 6 tiles, its background a
                                        picture of the map's size
+         [--toyagumon DIR [--cell N]]  or a Toyagumon3D game export (unzipped), a
+                                       block's top N pixels wide (64)
     dw3fe wstag330 --add-object picture.png 960,1000 [--frames 3]
                                        adds an object from a picture at a point of a
                                        field, and saves

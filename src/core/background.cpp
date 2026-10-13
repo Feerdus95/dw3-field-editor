@@ -380,7 +380,7 @@ Image Field::layerImage(int depth) const {
 }
 
 bool make_new_field(const Files &files, const Field &from, int mode, int area, int place, int w, int h, NewField *out,
-                    std::string *err) {
+                    std::string *err, const std::vector<uint8_t> *floor) {
     Field f = from;
     Stage &s = f.stage;
     char name[16];
@@ -398,6 +398,7 @@ bool make_new_field(const Files &files, const Field &from, int mode, int area, i
             if (!m.w) continue;
             m.w = w * 128, m.h = h * 128;
             m.px.assign((size_t)m.w * m.h, i == MAP_FLOOR0 ? 1 : 0);
+            if (i == MAP_FLOOR0 && floor && floor->size() == m.px.size()) m.px = *floor;
         }
         s.objects.clear(), s.actors.clear(), s.slots.clear();
         s.startX = w * 64 * 256, s.startY = h * 64 * 256, s.startDir = 0;

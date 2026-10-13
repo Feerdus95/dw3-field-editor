@@ -236,14 +236,14 @@ struct Field {
 /* A new field from an open one: its stage (named new<mode>, running
    templ's code, the banner's area and place names) and its files, by fid:
    the background and a copy of the logic maps' file. size w x h tiles: an
-   empty map (walkable all over, no characters, objects or slots); 0: a copy
-   of `from` as it is */
+   empty map (walkable all over, or as floor has it: w x h tiles' pixels, no
+   characters, objects or slots); 0: a copy of `from` as it is */
 struct NewField {
     Stage stage;
     std::map<int, std::vector<uint8_t>> files;
 };
 bool make_new_field(const Files &files, const Field &from, int mode, int area, int place, int w, int h, NewField *out,
-                    std::string *err);
+                    std::string *err, const std::vector<uint8_t> *floor = nullptr);
 /* The first mode no stage has, for a new field: 0x2F0 on, then 0x301 on
    (0x300 is the stage select's); 0 when none is left */
 int free_field_mode(const std::vector<Stage> &stages);
