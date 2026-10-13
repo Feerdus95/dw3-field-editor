@@ -45,11 +45,26 @@ std::string decode_text(const uint8_t *s, size_t n);
 /* A text file's strings, as they read (decode_text) */
 std::vector<std::string> read_strings(const std::vector<uint8_t> &file);
 
+/* An enemy of an encounter (BattleEnemy), named by its battle table entry */
+struct EncounterEnemy {
+    int fighter, level, hp, mp, strength;
+    std::string name;
+};
+/* FIELDSTG_encounters: the battles the fields start, by number (a Battle's encounter) */
+struct GameEncounter {
+    std::vector<EncounterEnemy> enemies; /* the fighters, none of 0 */
+    int ambushChance, kind;
+};
+/* "Name Lv 12, Name Lv 14", or "Nothing" */
+std::string encounter_text(const GameEncounter &e);
+
 /* The text files the editor reads, in a language */
 struct GameText {
     int lang = LANG_ENGLISH;
     std::vector<std::string> areas, places, items;
     std::vector<std::string> digimon, cards; /* DIGNAM (a partner's name: its index + 1), CARDNM */
+    std::vector<GameEncounter> encounters;
+    void read_encounters(const Files &files);
     void load(const Files &files, int language = LANG_ENGLISH);
     /* a text file's copy in the language: fid is the English one (the
        stage dump's textFile, run in English) */

@@ -73,7 +73,7 @@ Image fromQImage(const QImage &q, int w, int h) {
     return out;
 }
 
-static QColor slotColor(int i) {
+QColor slotColor(int i) {
     static const QRgb P[12] = {0xE6194B, 0x3CB44B, 0xFFE119, 0x4363D8, 0xF58231, 0x911EB4,
                                0x46F0F0, 0xF032E6, 0xBCF60C, 0xFABEBE, 0x008080, 0xE6BEFF};
     return QColor(P[i % 12]);
@@ -419,7 +419,7 @@ MainWindow::MainWindow(const Files &files, std::vector<Stage> stages, const Game
             int s = tr & 0x1F;
             parts << QString("trigger: slot %1, %2, facing %3").arg(s).arg(s < (int)field_.stage.slots.size() ? slotType(field_.stage.slots[s].type) : "?").arg(DIRS[tr >> 5]);
         }
-        if (ar > 0) parts << QString("battle area %1").arg(ar);
+        if (ar > 0) parts << (ar == 4 ? QString("event battles (area 4)") : QString("battle area %1").arg(ar));
         cursorLabel_->setText(parts.join("   ·   "));
     });
     connect(view_, &MapView::paintPressed, this, &MainWindow::beginStroke);
@@ -1098,6 +1098,8 @@ void MainWindow::setMapRegion(int map, const QRect &r, const std::vector<uint8_t
         refreshItems();
         fillEntities();
     }
+    /* an area painted or cleared: its card in Battles */
+    if (map == MAP_AREAS && selKind_ == KIND_BATTLES) showProperties();
     updateTitle();
 }
 
@@ -1292,7 +1294,9 @@ void MainWindow::refreshPaintOptions() {
         if (selKind_ == KIND_SLOT && selIndex_ >= 0) keep = selIndex_;
     } else if (tool_ == TOOL_AREAS) {
         valueBox_->addItem("No battles (0)", 0);
-        for (int a = 1; a <= 4; a++) valueBox_->addItem(QString("Battle area %1").arg(a), a);
+        for (int a = 1; a <= 3; a++) valueBox_->addItem(QString("Battle area %1").arg(a), a);
+        valueBox_->addItem("Event battles (area 4)", 4);
+        valueBox_->setItemData(4, "The battles events start; walking on it starts them at random too", Qt::ToolTipRole);
     }
     int at = valueBox_->findData(keep);
     if (at >= 0) valueBox_->setCurrentIndex(at);
@@ -1405,6 +1409,8 @@ void MainWindow::endStroke(QPointF p) {
         refreshItems();
         fillEntities();
     }
+    /* an area painted or erased: its card in Battles */
+    if (map == MAP_AREAS && selKind_ == KIND_BATTLES) showProperties();
     updateTitle();
 }
 

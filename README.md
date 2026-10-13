@@ -141,7 +141,15 @@ The window:
 - an exit: its type, where it leads, where the player arrives, and its conditions;
 - an object: its frame, depth and animation;
 - the player's start;
-- the battles (**Battles** in Contents): each area's rate and its eight battles.
+- the battles (**Battles** in Contents), a card per battle area painted on the map, in
+  its color: how often battles come there (very rarely, about every 256 steps, to very
+  often, about every 43), the battlefield and the music (each named by the fields that
+  have it), and **who appears**: the Digimon you meet, by name and level, and how often
+  (3 in 8). **Change...** picks others from the game's encounters, searched by a
+  Digimon's or a field's name; **+**, **-** and **×** meet them more often, less often or
+  never; **Add someone to meet...** adds more. Area 4 also holds the field's event
+  battles, which events start by number (Battle 1 to 8). Areas not painted are folded
+  away, and **Show the numbers** shows each battle as the game keeps it.
 
 **Conditions and actions** are a row each: what kind of thing (the story point, a flag,
 a field visited, an item, a card, the partners, money...), which one, picked from a list
@@ -303,6 +311,8 @@ The port's data folder needs the fields' tables, which the port writes once:
                                        each logic map, background tile, text and event
                                        script written and read back, the maps resized
                                        back and forth, a sprite imported
+    dw3fe --encounters                 prints the game's encounters: their enemies (name,
+                                       level, HP, MP) and the fields' areas with them
     dw3fe wstag245 --select actor:19   opens a field with something selected
                                        (actor:N, slot:N, object:N, event:N, start)
          [--window-shot out.png]       and saves the window and its properties

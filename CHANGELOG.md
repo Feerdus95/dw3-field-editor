@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- **Battles** in plain words: a card per painted battle area in its map color, how often
+  battles come in steps, the battlefield and music named by the fields that have them,
+  and who appears, by name and level, with their chances. Change them by picking from
+  the game's encounters (searched by a Digimon's name), make them more or less common, or
+  add more; each change is one undo step. The raw numbers are a click away.
+- `--encounters` prints the game's encounters, their enemies and where they are met.
+- An area with empty battles (nobody to meet) shows a warning: the game crashes when it
+  picks one. Adding someone fills the empty ones first.
+- Painting or erasing a battle area updates the Battles panel at once.
+- Area 4 is named **Event battles**, in Paint areas and in Battles.
+- **Add an object from another field...** (right click): any object of the game's
+  fields, animation included, copied into this one.
+- New fields from a Toyagumon3D game export (`--new-field ... --toyagumon DIR`): its
+  picture as the background, the floor from its blocks or its depth, and the front layer.
+
 ## v0.1.2
 
 - **Fixed:** at a story point, a character none of whose versions is there then (Tamer

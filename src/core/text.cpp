@@ -280,4 +280,44 @@ void GameText::load(const Files &files, int language) {
     items = read_strings(files.read(fid(0x6B + 1)));
     digimon = read_strings(files.read(fid(0x4F + 1)));
     cards = read_strings(files.read(fid(0x17 + 1)));
+    read_encounters(files);
+}
+
+/* FIELDSTG (fid 0x166, at 0x80082CB0): FIELDSTG_encounters (0x80094680,
+   0x24A4 bytes of 0x1C), each three pointers to FIELDSTG_enemies'
+   BattleEnemy; the names through FILE_BATTLE_TABLE (0x1CF, entries of 0x46
+   to an id of 0), whose nameId is a DIGNAM string, as
+   FIGHTSTG_showFighterNames reads it */
+void GameText::read_encounters(const Files &files) {
+    const uint32_t BASE = 0x80082CB0, TABLE = 0x80094680 - BASE, COUNT = 0x24A4 / 0x1C;
+    std::vector<uint8_t> fs = files.read(0x166), bt = files.read(0x1CF);
+    encounters.clear();
+    if (fs.size() < TABLE + COUNT * 0x1C) return;
+    auto s16 = [](const uint8_t *p) { return (int)(int16_t)(p[0] | p[1] << 8); };
+    std::map<int, std::string> names;
+    for (size_t at = 0; at + 0x46 <= bt.size() && s16(&bt[at]); at += 0x46) {
+        int name = s16(&bt[at + 6]);
+        names[s16(&bt[at])] = name >= 0 && name < (int)digimon.size() ? digimon[name] : "";
+    }
+    for (uint32_t k = 0; k < COUNT; k++) {
+        const uint8_t *e = &fs[TABLE + k * 0x1C];
+        GameEncounter g{{}, e[0xC], e[0xD]};
+        for (int i = 0; i < 3; i++) {
+            uint32_t at = rd32(e + i * 4) - BASE;
+            if (at + 12 > fs.size()) continue;
+            const uint8_t *b = &fs[at];
+            int fighter = (int32_t)rd32(b);
+            if (!fighter) continue;
+            std::string name = names[fighter];
+            g.enemies.push_back({fighter, s16(b + 4), s16(b + 6), s16(b + 8), s16(b + 10),
+                                 name.empty() ? "#" + std::to_string(fighter) : name});
+        }
+        encounters.push_back(g);
+    }
+}
+
+std::string encounter_text(const GameEncounter &e) {
+    std::string out;
+    for (auto &x : e.enemies) out += (out.empty() ? "" : ", ") + x.name + " Lv " + std::to_string(x.level);
+    return out.empty() ? "Nothing" : out;
 }

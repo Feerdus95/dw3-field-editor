@@ -6,6 +6,7 @@
    dw3fe --shot out.png stage       draws a stage's map to a picture and exits
    dw3fe --check                    reads every stage and prints what it found
    dw3fe --selftest                 checks what saving rests on over every stage
+   dw3fe --encounters               prints the game's encounters: their enemies and the stages with them
    dw3fe stage --select actor:N     opens a stage with something selected
                                     (actor:N, slot:N, object:N, event:N, start)
          [--window-shot out.png]    and saves the window and its properties as drawn, then quits
@@ -505,6 +506,7 @@ int main(int argc, char **argv) {
         else if (args[i] == "--add-character" && i + 2 < args.size()) addChar = args[++i], addAt = args[++i];
         else if (args[i] == "--check") check = true;
         else if (args[i] == "--selftest") selftest = true;
+        else if (args[i] == "--encounters") encounters = true;
         else if (args[i] == "--select" && i + 1 < args.size()) selectWhat = args[++i];
         else if (args[i] == "--window-shot" && i + 1 < args.size()) windowShot = args[++i];
         else open = args[i];
@@ -610,6 +612,27 @@ int main(int argc, char **argv) {
         if (c.id >= (int)animFiles.size()) animFiles.resize(c.id + 1, 0), animFiles[c.id] = c.animFile;
 
     if (selftest) return run_selftest(files, stages, animFiles);
+    if (encounters) {
+        /* each encounter, and where the stages' random battles start it (stage:place.area xN of 8) */
+        std::vector<std::vector<std::string>> used(text.encounters.size());
+        for (auto &s : stages)
+            for (auto &pl : s.places)
+                for (int a = 0; a < 4; a++) {
+                    std::map<int, int> n;
+                    for (auto &b : pl.areas[a].battles) n[b.encounter]++;
+                    for (auto &[e, c] : n)
+                        if (e > 0 && e < (int)used.size())
+                            used[e].push_back(s.name + ":" + std::to_string(pl.id) + "." + std::to_string(a + 1) + "x" + std::to_string(c));
+                }
+        for (int k = 0; k < (int)text.encounters.size(); k++) {
+            const GameEncounter &e = text.encounters[k];
+            printf("%d (kind %d, ambush %d):", k, e.kind, e.ambushChance);
+            for (auto &x : e.enemies) printf(" %s Lv %d HP %d MP %d x%d/16;", x.name.c_str(), x.level, x.hp, x.mp, x.strength);
+            for (auto &u : used[k]) printf(" %s", u.c_str());
+            printf("\n");
+        }
+        return text.encounters.empty();
+    }
     if (!exportId.isEmpty()) {
         /* a character's template (hex number), or "standard" for the blank one */
         CharTemplate t = standard_template();

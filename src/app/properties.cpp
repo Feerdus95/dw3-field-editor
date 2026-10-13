@@ -1,10 +1,15 @@
 /* The Properties panel: what is selected, as a form whose every change is
    an undoable edit of the stage's tables */
 #include "mainwindow.h"
+#include <map>
+#include <set>
 #include "characters.h"
 #include <QMessageBox>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QListWidget>
+#include <QDialogButtonBox>
+#include <QDialog>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
@@ -12,14 +17,17 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QScrollBar>
 #include <QSpinBox>
 #include <QStatusBar>
 #include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <algorithm>
+#include <climits>
 
 QString slotType(int t);
+QColor slotColor(int i);
 bool leaves(int t);
 extern const char *DIRS[8];
 
@@ -78,8 +86,13 @@ void MainWindow::showProperties() {
     else if (selKind_ == KIND_EVENT && selIndex_ >= 0 && selIndex_ < (int)s.events.size()) eventForm(f, selIndex_);
     else stageForm(f);
     /* the old form may be the sender of the signal that brought us here */
+    /* the same thing's form again (an edit, a stroke): where it was scrolled to */
+    static int shownKind = -1, shownIndex = -1;
+    int scroll = selKind_ == shownKind && selIndex_ == shownIndex ? props_->verticalScrollBar()->value() : 0;
+    shownKind = selKind_, shownIndex = selIndex_;
     if (QWidget *old = props_->takeWidget()) old->deleteLater();
     props_->setWidget(w);
+    QTimer::singleShot(0, props_, [this, scroll] { props_->verticalScrollBar()->setValue(scroll); });
 }
 
 void MainWindow::actorForm(QFormLayout *f, int index) {
@@ -609,43 +622,316 @@ void MainWindow::stageForm(QFormLayout *f) {
     f->addRow(richLabel(h));
 }
 
+/* "A, B, C, 2 more": the first fields of a list */
+static QString someOf(const QStringList &names) {
+    QStringList shown = names.mid(0, 3);
+    if (names.size() > 3) shown << QString("%1 more").arg(names.size() - 3);
+    return shown.join(", ");
+}
+
+/* The game's encounters to pick one of, searched by the enemies' names or
+   the fields that have them: the picked one, or -1 */
+static int pickEncounter(QWidget *parent, const GameText &text, const std::map<int, QStringList> &met, int current) {
+    QDialog d(parent);
+    d.setWindowTitle("Pick who appears");
+    d.resize(720, 560);
+    auto *v = new QVBoxLayout(&d);
+    auto *filter = new QLineEdit;
+    filter->setPlaceholderText("Search a Digimon or a field");
+    auto *list = new QListWidget;
+    for (int k = 1; k < (int)text.encounters.size(); k++) {
+        const GameEncounter &e = text.encounters[k];
+        if (e.enemies.empty()) continue;
+        auto in = met.find(k);
+        QString where = in == met.end() ? "no field" : someOf(in->second);
+        auto *it = new QListWidgetItem(QString("%1\n    #%2, in %3").arg(QString::fromStdString(encounter_text(e))).arg(k).arg(where));
+        it->setData(Qt::UserRole, k);
+        if (in != met.end()) it->setToolTip(in->second.join(", "));
+        list->addItem(it);
+        if (k == current) list->setCurrentItem(it);
+    }
+    QObject::connect(filter, &QLineEdit::textChanged, &d, [list](const QString &t) {
+        for (int i = 0; i < list->count(); i++)
+            list->item(i)->setHidden(!(list->item(i)->text() + list->item(i)->toolTip()).contains(t, Qt::CaseInsensitive));
+    });
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    QObject::connect(buttons, &QDialogButtonBox::accepted, &d, &QDialog::accept);
+    QObject::connect(buttons, &QDialogButtonBox::rejected, &d, &QDialog::reject);
+    QObject::connect(list, &QListWidget::itemDoubleClicked, &d, &QDialog::accept);
+    v->addWidget(filter);
+    v->addWidget(list, 1);
+    v->addWidget(buttons);
+    filter->setFocus();
+    if (d.exec() != QDialog::Accepted || !list->currentItem()) return -1;
+    return list->currentItem()->data(Qt::UserRole).toInt();
+}
+
+/* The Battles form's folds, kept as the form is made again after each edit */
+static bool showUnusedAreas = false, showBattleNumbers = false;
+
 void MainWindow::battlesForm(QFormLayout *f) {
     const Stage &s = field_.stage;
-    f->addRow(richLabel("<h3>Battles</h3><span style='color:#999'>Each place's four battle areas (the areas painted on "
-                        "the map): how often battles come, and the eight the game picks one of at random. A stage with "
-                        "several places uses the one GAME.place names.</span>"));
+    f->addRow(richLabel("<h3>Battles</h3><span style='color:#999'>Random battles start as you walk on the battle areas "
+                        "painted on the map (Paint areas): each area has how often they come and who you meet there. "
+                        "Events start the event battles.</span>"));
     if (s.places.empty()) {
         f->addRow(richLabel("This field has no battles."));
         return;
     }
+    /* the game's fields by what their battles have: battlefields, music and encounters */
+    std::map<int, QStringList> fought, played, met;
+    for (const Stage &o : stages_) {
+        if (o.isNew()) continue;
+        QString t = stageTitle(o);
+        auto note = [&t](QStringList &l) { if (!l.contains(t)) l << t; };
+        for (auto &pl : o.places)
+            for (int a = 0; a < 4; a++)
+                for (auto &bt : pl.areas[a].battles) {
+                    if (!bt.encounter) continue;
+                    note(met[bt.encounter]);
+                    if (pl.areas[a].rate || a == 3) note(fought[bt.stage]), note(played[bt.music]);
+                }
+    }
+    const LogicMap &areas = field_.maps[MAP_AREAS];
+    std::set<int> painted(areas.px.begin(), areas.px.end());
+    if (!painted.count(1) && !painted.count(2) && !painted.count(3) && !painted.count(4))
+        f->addRow(richLabel("<span style='color:#999'>No battle areas are painted: walking here starts no battle. "
+                            "Paint some (Paint areas) to have them.</span>"));
+
+    auto encName = [this](int e) {
+        return e > 0 && e < (int)text_.encounters.size() ? QString::fromStdString(encounter_text(text_.encounters[e]))
+                                                        : QString("Nothing (encounter %1)").arg(e);
+    };
+    auto encTip = [this](int e) {
+        QStringList t;
+        if (e > 0 && e < (int)text_.encounters.size())
+            for (auto &x : text_.encounters[e].enemies)
+                t << QString("%1: level %2, %3 HP, strength %4/16").arg(QString::fromStdString(x.name)).arg(x.level).arg(x.hp).arg(x.strength);
+        return QString("Encounter %1\n").arg(e) + t.join("\n");
+    };
+    /* a list of the values the game's fields use, each named by them: the battlefields or the music */
+    auto namedBox = [](const std::map<int, QStringList> &by, int cur, bool numbered) {
+        auto *c = new QComboBox;
+        c->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+        c->setMinimumContentsLength(12);
+        for (auto &[v, names] : by) c->addItem((numbered ? QString("%1: ").arg(v) : QString()) + "as in " + someOf(names), v);
+        if (c->findData(cur) < 0) c->addItem(QString("%1: no field's battles").arg(cur), cur);
+        c->setCurrentIndex(c->findData(cur));
+        return c;
+    };
+    auto mostOf = [](const std::map<int, int> &n) {
+        return n.empty() ? 0 : std::max_element(n.begin(), n.end(), [](auto &x, auto &y) { return x.second < y.second; })->first;
+    };
+
+    bool many = s.places.size() > 1;
     for (int p = 0; p < (int)s.places.size(); p++) {
+        if (many)
+            f->addRow(richLabel(QString("<b>Place %1</b> <span style='color:#999'>· battles depend on which entrance you "
+                                        "came in by: each has its own areas</span>").arg(s.places[p].id)));
+        QStringList unused;
+        std::vector<QGroupBox *> unusedBoxes;
         for (int a = 0; a < 4; a++) {
             const Area &ar = s.places[p].areas[a];
-            auto *box = new QGroupBox(QString("Place %1 · area %2").arg(s.places[p].id).arg(a + 1));
-            auto *bf = new QFormLayout(box);
+            bool on = painted.count(a + 1), events = a == 3;
             auto edit = [this, p, a](auto change, const QString &what) {
                 Stage t = field_.stage;
                 change(t.places[p].areas[a]);
                 changeTables(t, what);
             };
-            auto *rate = spin(0, 255, ar.rate);
-            rate->setToolTip("How often battles come: an index of FIELDSTG_battleRates (0: none)");
-            connect(rate, &QSpinBox::valueChanged, this, [=](int v) { edit([v](Area &x) { x.rate = v; }, "Change a battle rate"); });
-            bf->addRow("Rate", rate);
-            for (int k = 0; k < 8; k++) {
-                auto *enc = spin(0, 65535, ar.battles[k].encounter), *stage = spin(0, 255, ar.battles[k].stage);
-                enc->setToolTip("The encounter (FIELDSTG_encounters)");
-                stage->setToolTip("The fight stage it is fought on");
-                connect(enc, &QSpinBox::valueChanged, this, [=](int v) { edit([v, k](Area &x) { x.battles[k].encounter = v; }, "Change a battle"); });
-                connect(stage, &QSpinBox::valueChanged, this, [=](int v) { edit([v, k](Area &x) { x.battles[k].stage = v; }, "Change a battle"); });
-                auto *row = new QHBoxLayout;
-                row->addWidget(new QLabel("encounter"));
-                row->addWidget(enc);
-                row->addWidget(new QLabel("stage"));
-                row->addWidget(stage);
-                bf->addRow(QString("%1").arg(k + 1), row);
+            QColor col = slotColor(a + 6);
+            auto *box = new QGroupBox((events ? QString("Event battles (area 4)") : QString("Area %1").arg(a + 1)) + (on ? "" : " · not painted"));
+            box->setStyleSheet(QString("QGroupBox{border:2px solid %1;border-radius:4px;margin-top:1.4em;padding-top:4px}"
+                                       "QGroupBox::title{subcontrol-origin:margin;left:8px;padding:0 4px;color:%1;font-weight:bold}")
+                                   .arg(col.name()));
+            auto *bf = new QFormLayout(box);
+            std::map<int, int> count, stages, musics;
+            std::vector<int> order; /* the encounters, as they first come */
+            for (auto &bt : ar.battles) {
+                if (!count[bt.encounter]++) order.push_back(bt.encounter);
+                if (bt.encounter) stages[bt.stage]++, musics[bt.music]++;
             }
-            f->addRow(box);
+            if (events)
+                bf->addRow(richLabel("<span style='color:#999'>Events start these by number (Battle 1 to 8)" +
+                                     QString(on ? "; walking on the area picks one of them at random." : ".") + "</span>" +
+                                     (on && count.count(0) ? "<br><span style='color:#f55'>Painted with empty battles (Nothing): the "
+                                                             "game crashes when it picks one. Give each someone.</span>" : "")));
+            if (on) {
+                /* how often: the steps a battle takes, about 767 (512 to 1023) over the rate's FIELDSTG_battleRates */
+                static const char *RATES[6] = {"Right away: at the next step", "Very rarely: about every 256 steps",
+                                               "Rarely: about every 192 steps", "Normally: about every 128 steps",
+                                               "Often: about every 85 steps", "Very often: about every 43 steps"};
+                auto *rate = new QComboBox;
+                rate->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+                for (int r : {5, 4, 3, 2, 1, 0}) rate->addItem(RATES[r], r);
+                rate->setCurrentIndex(std::max(0, rate->findData(ar.rate)));
+                rate->setToolTip("Each step takes 3, 4, 6, 9 or 18 (very rarely to very often) from a count of 512 to 1023 "
+                                 "that starts a battle at 0; right away takes 2000");
+                connect(rate, &QComboBox::activated, this, [=] {
+                    int v = rate->currentData().toInt();
+                    edit([v](Area &x) { x.rate = v; }, "Change how often battles come");
+                });
+                bf->addRow("Battles come", rate);
+            }
+            if (on || events) {
+                auto *field = namedBox(fought, stages.empty() ? 1 : mostOf(stages), true);
+                field->setToolTip("Where the area's battles are fought: the fight stage of all eight");
+                connect(field, &QComboBox::activated, this, [=] {
+                    int v = field->currentData().toInt();
+                    edit([v](Area &x) { for (auto &bt : x.battles) bt.stage = v; }, "Change the battlefield");
+                });
+                bf->addRow("Battlefield", field);
+                auto *music = namedBox(played, mostOf(musics), false);
+                music->setToolTip("The music of the area's battles, all eight");
+                connect(music, &QComboBox::activated, this, [=] {
+                    int v = music->currentData().toInt();
+                    edit([v](Area &x) { for (auto &bt : x.battles) bt.music = v; }, "Change the battle music");
+                });
+                bf->addRow("Music", music);
+            }
+            if (events) {
+                /* each its own: the events name them by number */
+                for (int k = 0; k < 8; k++) {
+                    auto *row = new QHBoxLayout;
+                    auto *who = new QLabel(encName(ar.battles[k].encounter).replace(", ", "\n"));
+                    who->setToolTip(encTip(ar.battles[k].encounter));
+                    auto *change = new QPushButton("Change...");
+                    connect(change, &QPushButton::clicked, this, [=] {
+                        int e = pickEncounter(this, text_, met, ar.battles[k].encounter);
+                        if (e > 0) edit([e, k](Area &x) { x.battles[k].encounter = e; }, "Change an event battle");
+                    });
+                    row->addWidget(who, 1), row->addWidget(change);
+                    bf->addRow(QString("Battle %1").arg(k + 1), row);
+                }
+            } else {
+                /* who appears: each encounter's share of the eight; a slot changes hands, keeping its battlefield and music.
+                   Encounter 0 has no enemies, a battle the game can't start: the
+                   first to go to someone added, never one given back */
+                auto give = [](Area &x, int from, int to) {
+                    for (int k = 7; k >= 0; k--)
+                        if (x.battles[k].encounter == from) return void(x.battles[k].encounter = to);
+                };
+                auto most = [](const Area &x, int but) {
+                    std::map<int, int> n;
+                    for (auto &bt : x.battles)
+                        if (bt.encounter != but && bt.encounter) n[bt.encounter]++;
+                    return n.empty() ? -1 : std::max_element(n.begin(), n.end(), [](auto &l, auto &r) { return l.second < r.second; })->first;
+                };
+                /* where someone added comes from: a battle of nobody, else of the most common other one */
+                auto source = [most](const Area &x, int e) {
+                    for (auto &bt : x.battles)
+                        if (!bt.encounter) return 0;
+                    return most(x, e);
+                };
+                bf->addRow(richLabel("<b>Who appears</b>"));
+                for (int e : order) {
+                    int n = count[e];
+                    auto *row = new QHBoxLayout;
+                    if (!e) {
+                        int to = most(ar, 0);
+                        auto *who = richLabel(QString("<b>%1 in 8</b> <span style='color:#f55'>nobody: the game crashes when it "
+                                                      "picks one of these</span>").arg(n));
+                        auto *fill = new QToolButton;
+                        fill->setText("Give them to others"), fill->setEnabled(to > 0);
+                        fill->setToolTip(to > 0 ? "They go to " + encName(to) : "Add someone to meet first");
+                        connect(fill, &QToolButton::clicked, this, [=] {
+                            edit([to](Area &x) { for (auto &bt : x.battles) if (!bt.encounter) bt.encounter = to; }, "Fill the empty battles");
+                        });
+                        delete row;
+                        if (on) bf->addRow(who), bf->addRow(fill);
+                        else delete who, delete fill;
+                        continue;
+                    }
+                    auto *who = new QLabel(QString("<b>%1 in 8</b> (%2%) &nbsp;%3").arg(n).arg(n * 100 / 8).arg(encName(e).toHtmlEscaped().replace(", ", "<br>")));
+                    who->setToolTip(encTip(e));
+                    auto button = [&](const QString &label, const QString &tip, bool enabled, auto change, const QString &what) {
+                        auto *b = new QToolButton;
+                        b->setText(label), b->setToolTip(tip), b->setEnabled(enabled);
+                        connect(b, &QToolButton::clicked, this, [=] { edit(change, what); });
+                        row->addWidget(b);
+                    };
+                    row->addWidget(who, 1);
+                    auto *change = new QToolButton;
+                    change->setText("Change..."), change->setToolTip("Meet others in its place");
+                    connect(change, &QToolButton::clicked, this, [=] {
+                        int to = pickEncounter(this, text_, met, e);
+                        if (to > 0 && to != e)
+                            edit([e, to](Area &x) { for (auto &bt : x.battles) if (bt.encounter == e) bt.encounter = to; }, "Change who appears");
+                    });
+                    row->addWidget(change);
+                    bool others = most(ar, e) > 0;
+                    button("+", "More often: an empty battle, or one of the most common other one, becomes this", n < 8,
+                           [=](Area &x) { give(x, source(x, e), e); }, "Meet some more often");
+                    button("-", "Less often: one of its battles goes to the most common other one", n > 1 && others,
+                           [=](Area &x) { give(x, e, most(x, e)); }, "Meet some less often");
+                    button("×", "Never: its battles go to the others", others, [=](Area &x) {
+                        while (std::any_of(std::begin(x.battles), std::end(x.battles), [e](auto &bt) { return bt.encounter == e; }))
+                            give(x, e, most(x, e));
+                    }, "Meet some no more");
+                    bf->addRow(row);
+                }
+                auto *add = new QPushButton("Add someone to meet...");
+                add->setToolTip("They take the empty battles, or else one of the most common ones'");
+                connect(add, &QPushButton::clicked, this, [=] {
+                    int e = pickEncounter(this, text_, met, -1);
+                    if (e > 0) edit([=](Area &x) {
+                        if (source(x, e)) return give(x, source(x, e), e);
+                        for (auto &bt : x.battles) if (!bt.encounter) bt.encounter = e;
+                    }, "Add someone to meet");
+                });
+                bf->addRow(add);
+            }
+            if (showBattleNumbers) {
+                auto *raw = new QWidget;
+                auto *rf = new QFormLayout(raw);
+                rf->setContentsMargins(0, 0, 0, 0);
+                if (!on) {
+                    auto *rate = spin(0, 5, ar.rate);
+                    rate->setToolTip("FIELDSTG_battleRates' index: 1 to 5 takes 3, 4, 6, 9 or 18 a step, 0 takes 2000");
+                    connect(rate, &QSpinBox::valueChanged, this, [=](int v) { edit([v](Area &x) { x.rate = v; }, "Change how often battles come"); });
+                    rf->addRow("Rate", rate);
+                }
+                for (int k = 0; k < 8; k++) {
+                    auto *enc = spin(0, 65535, ar.battles[k].encounter), *stage = spin(0, 255, ar.battles[k].stage),
+                         *music = spin(INT_MIN, INT_MAX, ar.battles[k].music);
+                    enc->setToolTip("The encounter (FIELDSTG_encounters)");
+                    stage->setToolTip("The fight stage it is fought on");
+                    music->setToolTip("Its music");
+                    connect(enc, &QSpinBox::valueChanged, this, [=](int v) { edit([v, k](Area &x) { x.battles[k].encounter = v; }, "Change a battle"); });
+                    connect(stage, &QSpinBox::valueChanged, this, [=](int v) { edit([v, k](Area &x) { x.battles[k].stage = v; }, "Change a battle"); });
+                    connect(music, &QSpinBox::valueChanged, this, [=](int v) { edit([v, k](Area &x) { x.battles[k].music = v; }, "Change a battle"); });
+                    auto *row = new QHBoxLayout;
+                    row->addWidget(enc), row->addWidget(stage), row->addWidget(music);
+                    rf->addRow(QString("%1").arg(k + 1), row);
+                }
+                bf->addRow(raw);
+            }
+            if (on || (events && order != std::vector<int>{0})) f->addRow(box);
+            else unused << QString::number(a + 1), unusedBoxes.push_back(box);
+        }
+        if (!unused.isEmpty()) {
+            auto *fold = new QToolButton;
+            fold->setText(QString("Areas not painted: %1").arg(unused.join(", ")));
+            fold->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+            fold->setArrowType(showUnusedAreas ? Qt::DownArrow : Qt::RightArrow);
+            fold->setAutoRaise(true);
+            fold->setToolTip("Their battles come only once they are painted on the map");
+            connect(fold, &QToolButton::clicked, this, [this] {
+                showUnusedAreas = !showUnusedAreas;
+                QTimer::singleShot(0, this, &MainWindow::showProperties);
+            });
+            f->addRow(fold);
+            for (auto *b : unusedBoxes) {
+                if (showUnusedAreas) f->addRow(b);
+                else delete b;
+            }
         }
     }
+    auto *numbers = new QCheckBox("Show the numbers");
+    numbers->setChecked(showBattleNumbers);
+    numbers->setToolTip("Each area's eight battles as the game keeps them: encounter, fight stage and music");
+    connect(numbers, &QCheckBox::toggled, this, [this](bool on) {
+        showBattleNumbers = on;
+        QTimer::singleShot(0, this, &MainWindow::showProperties);
+    });
+    f->addRow(numbers);
 }
